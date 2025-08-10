@@ -11,6 +11,7 @@
   "dependencies": {
     "@expo/html-elements": "latest",
     "@expo/metro-config": "^0.20.17",
+    "@expo/vector-icons": "^14.1.0",
     "@gluestack-style/animation-plugin": "latest",
     "@gluestack-style/react": "^1.0.57",
     "@gluestack-ui/actionsheet": "latest",
@@ -47,6 +48,7 @@
     "@gluestack-ui/tooltip": "latest",
     "@gluestack-ui/vstack": "latest",
     "@legendapp/motion": "latest",
+    "@react-native-community/datetimepicker": "8.4.1",
     "babel-plugin-module-resolver": "^5.0.2",
     "expo": "~53.0.0",
     "expo-status-bar": "~2.2.3",
@@ -55,12 +57,12 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-native-css-interop": "^0.1.22",
+    "react-native-modal": "^14.0.0-rc.1",
     "react-native-reanimated": "~3.17.4",
     "react-native-safe-area-context": "5.4.0",
     "react-native-svg": "^15.11.2",
     "react-native-svg-charts": "^5.4.0",
-    "tailwindcss": "^3.4.17",
-    "@react-native-community/datetimepicker": "8.4.1"
+    "tailwindcss": "^3.4.17"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0",

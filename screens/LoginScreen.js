@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { StatusBar } from 'expo-status-bar';
+import { Alert, ActivityIndicator, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   Box, HStack, VStack, Text, Button, ButtonText,
@@ -10,6 +10,10 @@ import {
   FormControlError, FormControlErrorText,
   ArrowLeftIcon, EyeIcon, EyeOffIcon
 } from '@gluestack-ui/themed';
+import API_ROUTES from '../api';
+import Modal from 'react-native-modal';
+import { Ionicons } from '@expo/vector-icons';
+import { StatusBar } from 'expo-status-bar';
 
 export default function LoginScreen({ onBack, onRegister, onLogin }) {
   const [email, setEmail] = useState('');
@@ -17,6 +21,8 @@ export default function LoginScreen({ onBack, onRegister, onLogin }) {
   const [remember, setRemember] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState(false);
 
   const validateForm = () => {
     const newErrors = {};
@@ -28,13 +34,85 @@ export default function LoginScreen({ onBack, onRegister, onLogin }) {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = () => {
-    if (validateForm()) onLogin?.();
+  const handleSubmit = async () => {
+    if (!validateForm()) return;
+    setLoading(true);
+    setErrors({});
+    try {
+      const response = await fetch(API_ROUTES.LOGIN, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Accept': 'application/json'
+        },
+        body: new URLSearchParams({
+          correo: email,
+          contrasena: password
+        }).toString()
+      });
+
+      if (response.ok) {
+        setSuccess(true);
+        setTimeout(() => {
+          setSuccess(false);
+          setLoading(false);
+          onLogin?.();
+        }, 1200);
+      } else {
+        let errorMsg = 'Usuario no registrado o correo/contraseña incorrectos';
+        try {
+          const errorData = await response.json();
+          if (errorData && errorData.detail && errorData.detail[0]?.msg) {
+            errorMsg = errorData.detail[0].msg;
+          }
+        } catch (e) {
+          // Si no se puede parsear el error, se usa el mensaje por defecto
+        }
+        setLoading(false);
+        Alert.alert('Error', errorMsg, [{ text: 'Aceptar' }]);
+      }
+    } catch (error) {
+      setLoading(false);
+      Alert.alert('Error', 'Error de conexión con el servidor');
+    }
   };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }} edges={['top', 'bottom']}>
-      <StatusBar style="dark" backgroundColor="#ffffff" />
+      {/* StatusBar y fondo debajo */}
+      <StatusBar style="dark" translucent />
+      <Box
+        position="absolute"
+        top={0}
+        left={0}
+        right={0}
+        height={Platform.OS === 'android' ? 24 : 44}
+        bg="$white"
+        zIndex={1}
+      />
+
+      {/* Modal de carga */}
+      <Modal isVisible={loading || success} backdropOpacity={0.3}>
+        <Box
+          bg="$white"
+          p="$8"
+          borderRadius={20}
+          alignItems="center"
+          justifyContent="center"
+        >
+          {success ? (
+            <>
+              <Ionicons name="checkmark-circle" size={64} color="#22c55e" />
+              <Text fontSize="$lg" color="$green700" mt="$4">¡Ingreso exitoso!</Text>
+            </>
+          ) : (
+            <>
+              <ActivityIndicator size="large" color="#e11d48" />
+              <Text fontSize="$lg" color="$red600" mt="$4">Ingresando...</Text>
+            </>
+          )}
+        </Box>
+      </Modal>
 
       {/* Header */}
       <HStack
@@ -196,7 +274,7 @@ export default function LoginScreen({ onBack, onRegister, onLogin }) {
 
             {/* Botón principal */}
             <Button
-              bg="$red600"
+              bg={loading ? "$red800" : "$red600"}
               borderRadius="$xl"
               size="xl"
               mt="$6"
@@ -206,11 +284,20 @@ export default function LoginScreen({ onBack, onRegister, onLogin }) {
               shadowRadius={10}
               elevation={6}
               onPress={handleSubmit}
+              isDisabled={loading}
             >
               <ButtonText fontSize="$lg" fontWeight="$bold" color="$white">
                 Ingresar
               </ButtonText>
             </Button>
+
+            {errors.api && (
+              <FormControlError mt="$2">
+                <FormControlErrorText color="$red500" fontSize="$sm">
+                  {errors.api}
+                </FormControlErrorText>
+              </FormControlError>
+            )}
 
             {/* Divider + Google */}
             <HStack alignItems="center" mt="$10" mb="$6">
