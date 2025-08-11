@@ -155,6 +155,7 @@ export default function GoalsScreen({
   onLogout = () => {},
   onBudgets = () => {},
   onRecurring = () => {},
+  onProfile = () => {},
 }) {
   const [showPopover, setShowPopover] = useState(false);
   const [tab, setTab] = useState('activos');
@@ -474,6 +475,7 @@ export default function GoalsScreen({
           onLogout={onLogout}
           onBudgets={onBudgets}
           onRecurring={onRecurring}
+            onProfile={onProfile}
         />
         <Text fontSize={24} fontWeight="$bold" color="$black">Objetivos</Text>
         <Pressable rounded="$full" p="$2" bg="$coolGray100" onPress={onNotifications}>

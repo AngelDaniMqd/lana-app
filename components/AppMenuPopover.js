@@ -7,7 +7,9 @@ import { MaterialIcons } from '@expo/vector-icons';
 
 export default function AppMenuPopover({
   showPopover, setShowPopover,
-  onHome, onMenu, onStatistics, onDebts, onGoals, onBudgets, onRecurring, onLogout
+  onProfile, // <-- agrega esta prop
+  onMenu, onStatistics, onDebts, onGoals, onHome, onBudgets, onRecurring, onLogout,
+  ...props
 }) {
   return (
     <Popover
@@ -30,6 +32,9 @@ export default function AppMenuPopover({
         <PopoverArrow />
         <PopoverBody p={0}>
           <VStack divider={<Box h={1} bg="$coolGray100" />} space={0}>
+            <Pressable px="$4" py="$3" onPress={() => { setShowPopover(false); onProfile(); }}>
+              <Text fontWeight="$bold" color="$black">Perfil</Text>
+            </Pressable>
             <Pressable px="$4" py="$3" onPress={() => { setShowPopover(false); onHome?.(); }}>
               <Text>Inicio</Text>
             </Pressable>

@@ -46,6 +46,7 @@ export default function DebtsScreen({
   onLogout = () => {},
   onBudgets = () => {},
   onRecurring = () => {},
+  onProfile = () => {},
 }) {
   const [showPopover, setShowPopover] = useState(false);
   const [tab, setTab] = useState('mePrestaron'); // 'mePrestaron' | 'presto'
@@ -146,6 +147,7 @@ export default function DebtsScreen({
   onBudgets={onBudgets}      // <-- CORRECTO
   onRecurring={onRecurring}  // <-- CORRECTO
   onLogout={onLogout}
+  onProfile={onProfile}
 />
         <Text fontSize="$2xl" fontWeight="$bold" color="$black">
           Deudas

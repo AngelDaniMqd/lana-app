@@ -22,6 +22,7 @@ export default function BudgetsScreen({
   onLogout = () => {},
   onBudgets = () => {},
   onRecurring = () => {},
+  onProfile = () => {},
 }) {
   const [showPopover, setShowPopover] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -63,6 +64,7 @@ export default function BudgetsScreen({
         onLogout={onLogout}
         onBudgets={onBudgets}
         onRecurring={onRecurring}
+          onProfile={onProfile}
       />
       <Text fontSize="$2xl" fontWeight="$bold" color="$black">{title}</Text>
       <Pressable rounded="$full" p="$2" bg="$coolGray100" onPress={onNotifications}>

@@ -112,6 +112,7 @@ export default function StatisticsScreen({
   onLogout = () => {},
   onBudgets = () => {},
   onRecurring = () => {},
+  onProfile = () => {},
 }) {
   const [tab, setTab] = useState('Saldo');
   const [showPopover, setShowPopover] = useState(false);
@@ -148,9 +149,10 @@ export default function StatisticsScreen({
   onStatistics={onStatistics}
   onDebts={onDebts}
   onGoals={onGoals}
-  onBudgets={onBudgets}      // <-- CORRECTO
-  onRecurring={onRecurring}  // <-- CORRECTO
+  onBudgets={onBudgets}
+  onRecurring={onRecurring}
   onLogout={onLogout}
+  onProfile={onProfile} // <-- AGREGA ESTA LÍNEA
 />
           <Text fontSize="$2xl" fontWeight="$bold" color="$black">Estadísticas</Text>
           <Pressable rounded="$full" p="$2" bg="$coolGray100" onPress={onNotifications}>

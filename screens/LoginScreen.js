@@ -14,6 +14,7 @@ import API_ROUTES from '../api';
 import Modal from 'react-native-modal';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
+import { parseJwt } from '../utils/jwt';
 
 export default function LoginScreen({ onBack, onRegister, onLogin }) {
   const [email, setEmail] = useState('');
@@ -52,12 +53,13 @@ export default function LoginScreen({ onBack, onRegister, onLogin }) {
       });
 
       if (response.ok) {
-        setSuccess(true);
-        setTimeout(() => {
-          setSuccess(false);
-          setLoading(false);
-          onLogin?.();
-        }, 1200);
+        const data = await response.json();
+        const token = data.access_token;
+        const payload = parseJwt(token);
+        const userId = payload?.sub; // <-- El ID del usuario
+
+        // Llama a onLogin pasando token y userId
+        onLogin({ token, userId });
       } else {
         let errorMsg = 'Usuario no registrado o correo/contraseña incorrectos';
         try {
