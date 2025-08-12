@@ -8,16 +8,24 @@ import {
   Spinner,
 } from '@gluestack-ui/themed';
 import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
-import { AreaChart, Grid } from 'react-native-svg-charts';
+import { AreaChart, Grid, YAxis } from 'react-native-svg-charts';
 import * as shape from 'd3-shape';
-import { Defs, LinearGradient, Stop } from 'react-native-svg';
+import { Defs, LinearGradient, Stop, Circle } from 'react-native-svg';
 import AppMenuPopover from '../components/AppMenuPopover';
 import {
   getCuentas, postCuenta, putCuenta, deleteCuenta,
   getGraficoResumen, getGraficoPorDias, getGraficoCuentas,
   getRegistros, getMetodos, getSubcategorias,
 } from '../api';
-
+// Colores llamativos para las sombras de las cuentas
+const ACCOUNT_SHADOW_COLORS = [
+  '#f87171', // rojo
+  '#fbbf24', // amarillo
+  '#34d399', // verde
+  '#60a5fa', // azul
+  '#a78bfa', // morado
+  '#f472b6', // rosa
+];
 /** ---------- Tarjeta KPI con info ---------- */
 const KpiCard = ({ label, value, delta, positive, icon = 'chart-line', info }) => (
   <Box
@@ -79,6 +87,7 @@ const AccountCard = ({
   isMenuOpen = false,
   onOpenMenu = () => {},
   onCloseMenu = () => {},
+  shadowColor = '#000',
 }) => (
   <Box
     bg="$white"
@@ -89,12 +98,12 @@ const AccountCard = ({
     mr="$3"
     minW={260}
     style={{
-      shadowColor: '#000',
-      shadowOpacity: 0.06,
-      shadowRadius: 10,
-      shadowOffset: { width: 0, height: 6 },
-      elevation: 3,
-    }}
+    shadowColor: shadowColor, 
+    shadowOpacity: 0.34,      // Más opacidad
+    shadowRadius: 10,         // Más grande
+    shadowOffset: { width: 0, height: 16 }, // Más desplazada hacia abajo
+    elevation: 8,            // Más grande en Android
+  }}
     position="relative"
   >
     <Popover
@@ -153,34 +162,37 @@ const AccountCard = ({
   </Box>
 );
 
-/** ---------- Gradiente gráfico ---------- */
-const Gradient = () => (
-  <Defs>
-    <LinearGradient id="homeGradient" x1="0" y1="0" x2="0" y2="1">
-      <Stop offset="0%" stopColor="#4f46e5" stopOpacity={0.3} />
-      <Stop offset="100%" stopColor="#4f46e5" stopOpacity={0.06} />
-    </LinearGradient>
-  </Defs>
-);
-
 // ===== Helpers =====
 const fmtMoney = (n) => (typeof n === 'number' && !isNaN(n) ? `MXN ${n.toLocaleString('es-MX', { minimumFractionDigits: 0 })}` : '—');
 const fmtMoney2 = (n) => (typeof n === 'number' && !isNaN(n) ? `MXN ${n.toLocaleString('es-MX', { minimumFractionDigits: 2 })}` : '—');
 const pct = (num, den) => {
   if (!isFinite(num) || !isFinite(den) || Math.abs(den) < 1e-9) return '—';
-  const r = Math.round((num / den) * 1000) / 10; // 1 decimal
+  const r = Math.round((num / den) * 1000) / 10;
   return `${r >= 0 ? '+' : ''}${r}%`;
 };
 const moneySign = (n) => (n < 0 ? '-' : '+');
 const colorBySign = (n) => (n < 0 ? '$red600' : '$green600');
-const formatSigned = (n) => `${moneySign(n)} ${fmtMoney2(Math.abs(n))}`;
 const formatDateOnly = (iso) => {
-  try {
-    return new Date(iso).toLocaleDateString('es-MX', { dateStyle: 'medium' });
-  } catch {
-    return String(iso).split('T')[0] || '—';
-  }
+  try { return new Date(iso).toLocaleDateString('es-MX', { dateStyle: 'medium' }); }
+  catch { return String(iso).split('T')[0] || '—'; }
 };
+
+// Color de la gráfica
+const CHART_COLOR = '#16a34a';
+
+// redondeo 1 decimal
+const round1Up = (x) => Math.ceil(x * 10) / 10;
+const round1Down = (x) => Math.floor(x * 10) / 10;
+
+/** Gradiente para el área */
+const Gradient = ({ color }) => (
+  <Defs>
+    <LinearGradient id="last5Gradient" x1="0" y1="0" x2="0" y2="1">
+      <Stop offset="0%" stopColor={color} stopOpacity={0.28} />
+      <Stop offset="100%" stopColor={color} stopOpacity={0.06} />
+    </LinearGradient>
+  </Defs>
+);
 
 export default function HomeScreen({
   user,
@@ -228,7 +240,7 @@ export default function HomeScreen({
   const [accounts, setAccounts] = useState([]);
   const [loadingAccounts, setLoadingAccounts] = useState(true);
 
-  // Analíticas
+  // Analíticas (para KPIs)
   const [resumen, setResumen] = useState(null);
   const [porDias, setPorDias] = useState(null);
   const [cuentasResumen, setCuentasResumen] = useState(null);
@@ -289,70 +301,78 @@ export default function HomeScreen({
       .finally(() => setLoadingRegistros(false));
   }, [token]);
 
-  // ====== Cálculos analíticos ======
-  const analytics = useMemo(() => {
-    const ingresosMes = Number(resumen?.ingresos_mes ?? 0);
-    const gastosMes = Number(resumen?.gastos_mes ?? 0);
-    const totalSaldo = Number(resumen?.total_saldo ?? 0);
+  // ====== ÚNICA GRÁFICA: últimos 5 registros de TODAS las cuentas ======
+  const chartPts = useMemo(() => {
+    // considerar solo registros de cuentas del usuario
+    const ids = new Set(accounts.map(a => a.id));
+    let list = Array.isArray(registros) ? registros.filter(r => ids.has(r.lista_cuentas_id)) : [];
 
-    const diarios = Array.isArray(porDias?.resumen_diario) ? [...porDias.resumen_diario] : [];
-    diarios.sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)));
-    const deltaPeriodo = diarios.reduce((acc, d) => acc + (Number(d.ingresos ?? 0) - Number(d.gastos ?? 0)), 0);
+    // tomar los 5 más recientes (sin importar la cuenta), luego ordenar cronológico para graficar
+    list.sort((a, b) => new Date(b.fecha_registro) - new Date(a.fecha_registro));
+    const last5 = list.slice(0, 5);
+    last5.sort((a, b) => new Date(a.fecha_registro) - new Date(b.fecha_registro));
 
-    const saldoInicio = totalSaldo - deltaPeriodo;
+    const rawVals = last5.map((m) => Number(m?.monto ?? 0));
+    const hasAny = rawVals.length > 0;
 
-    const movs = Array.isArray(porDias?.movimientos_individuales) ? [...porDias.movimientos_individuales] : [];
-    movs.sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)));
-    let running = saldoInicio;
-    const serieSaldo = [running];
-    for (const m of movs) {
-      const monto = Number(m.monto ?? 0);
-      running += Number.isFinite(monto) ? monto : 0;
-      serieSaldo.push(running);
+    // escala automática a miles/millones
+    const basis = rawVals.reduce((mx, v) => Math.max(mx, Math.abs(Number(v) || 0)), 0);
+    let scale = 1, scaleNote = '', axisSuffix = '';
+    if (basis >= 1e7) { scale = 1e6; scaleNote = 'Escala: millones (×1,000,000)'; axisSuffix = ' M'; }
+    else if (basis >= 1e5) { scale = 1e3; scaleNote = 'Escala: miles (×1,000)'; axisSuffix = ' k'; }
+
+    const pts = rawVals.map(v => (Number(v) || 0) / scale);
+
+    let yMaxDesired = round1Up(Math.max(0, ...pts, 0));
+    let yMinDesired = round1Down(Math.min(0, ...pts, 0));
+    if (yMaxDesired - yMinDesired < 0.1) yMaxDesired = yMinDesired + 0.1;
+
+    const rangoTexto = hasAny
+      ? `${formatDateOnly(last5[0]?.fecha_registro)} → ${formatDateOnly(last5[last5.length - 1]?.fecha_registro)}`
+      : 'Sin datos';
+
+    return { pts, yMinDesired, yMaxDesired, scaleNote, axisSuffix, rangoTexto };
+  }, [registros, accounts]);
+
+  // Ejes "pegajosos"
+  const [axisY, setAxisY] = useState({ yMin: null, yMax: null, scaleNote: '', axisSuffix: '' });
+  useEffect(() => {
+    if (!chartPts) return;
+    if (axisY.yMin === null || axisY.axisSuffix !== chartPts.axisSuffix || axisY.scaleNote !== chartPts.scaleNote) {
+      setAxisY({
+        yMin: chartPts.yMinDesired,
+        yMax: chartPts.yMaxDesired,
+        scaleNote: chartPts.scaleNote,
+        axisSuffix: chartPts.axisSuffix,
+      });
+      return;
     }
-    if (serieSaldo.length < 2) serieSaldo.push(totalSaldo);
+    const yMin = Math.min(axisY.yMin, chartPts.yMinDesired);
+    const yMax = Math.max(axisY.yMax, chartPts.yMaxDesired);
+    if (yMin !== axisY.yMin || yMax !== axisY.yMax) setAxisY(prev => ({ ...prev, yMin, yMax }));
+  }, [chartPts.yMinDesired, chartPts.yMaxDesired, chartPts.scaleNote, chartPts.axisSuffix, chartPts.pts]);
 
-    const totalMovs = Math.abs(ingresosMes) + Math.abs(gastosMes);
-    const saldoDeltaPct = pct(totalSaldo - saldoInicio, Math.abs(saldoInicio));
-    const burnRatePct = pct(gastosMes, ingresosMes);
-    const ingresosSharePct = pct(ingresosMes, totalMovs);
-    const balancePct = pct(ingresosMes - gastosMes, totalMovs);
+  const Decorator = ({ x, y, data }) =>
+    data.map((value, index) => (
+      <Circle
+        key={index}
+        cx={x(index)}
+        cy={y(value)}
+        r={4}
+        stroke={CHART_COLOR}
+        fill={CHART_COLOR}
+      />
+    ));
 
-    return {
-      serieSaldo,
-      rangoTexto: (porDias?.fecha_inicio && porDias?.fecha_fin)
-        ? `${porDias.fecha_inicio} → ${porDias.fecha_fin}`
-        : 'Últimos 30 días',
-      kpis: {
-        saldo: {
-          value: fmtMoney(totalSaldo),
-          delta: saldoDeltaPct,
-          positive: (totalSaldo - saldoInicio) >= 0,
-          info: 'Variación del saldo final vs el saldo al inicio del periodo. Fórmula: (Saldo final − Saldo inicial) / Saldo inicial.'
-        },
-        gastos: {
-          value: fmtMoney(gastosMes),
-          delta: burnRatePct,
-          positive: false,
-          info: 'Burn rate del periodo. ¿Qué porcentaje de los ingresos se gastó? Fórmula: Gastos / Ingresos. Si Ingresos = 0 → “—”.'
-        },
-        ingresos: {
-          value: fmtMoney(ingresosMes),
-          delta: ingresosSharePct,
-          positive: true,
-          info: 'Participación de ingresos sobre el total de movimientos. Fórmula: Ingresos / (Ingresos + |Gastos|).'
-        },
-        balance: {
-          value: fmtMoney(ingresosMes - gastosMes),
-          delta: balancePct,
-          positive: (ingresosMes - gastosMes) >= 0,
-          info: 'Eficiencia neta del periodo. Fórmula: (Ingresos − Gastos) / (Ingresos + |Gastos|).'
-        },
-      }
-    };
-  }, [resumen, porDias]);
+  // === Resumen de registros: últimos 3 (todas las cuentas) ===
+  const lastThree = useMemo(() => {
+    const ids = new Set(accounts.map(a => a.id));
+    let list = Array.isArray(registros) ? registros.filter(r => ids.has(r.lista_cuentas_id)) : [];
+    list.sort((a, b) => new Date(b.fecha_registro) - new Date(a.fecha_registro));
+    return list.slice(0, 3);
+  }, [registros, accounts]);
 
-  // === Mapas para nombres ===
+  // Mapas para nombres (lista de movimientos)
   const metodosMap = useMemo(() => {
     const m = new Map();
     for (const it of metodos) m.set(it.id, it.nombre);
@@ -364,21 +384,6 @@ export default function HomeScreen({
     for (const it of subcats) m.set(it.id, it.descripcion);
     return m;
   }, [subcats]);
-
-  // === Derivados de “Resumen de registros” ===
-  const activeAccountId = accounts?.[0]?.id; // por ahora, primera cuenta
-  const lastTwo = useMemo(() => {
-    if (!Array.isArray(registros) || !activeAccountId) return [];
-    const filtered = registros.filter(r => r.lista_cuentas_id === activeAccountId);
-    filtered.sort((a, b) => new Date(b.fecha_registro) - new Date(a.fecha_registro));
-    return filtered.slice(0, 2);
-  }, [registros, activeAccountId]);
-
-  const accountNameById = useMemo(() => {
-    const map = new Map();
-    for (const a of accounts) map.set(a.id, a.nombre);
-    return map;
-  }, [accounts]);
 
   // Guardar/editar cuentas
   const saveAccount = async () => {
@@ -450,7 +455,6 @@ export default function HomeScreen({
           </Text>
         </VStack>
 
-        {/* Aviso EDITAR saldo: sin textos sueltos dentro de contenedores */}
         {editingAccountId && (
           <VStack
             space="$1.5"
@@ -554,7 +558,7 @@ export default function HomeScreen({
         </Pressable>
       </HStack>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 100 }}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 120 }}>
         {/* ===== Cuentas ===== */}
         <VStack px="$6" mt="$2" space="$2">
           <HStack alignItems="center" justifyContent="space-between">
@@ -574,28 +578,22 @@ export default function HomeScreen({
           ) : (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingRight: 24 }}>
               <HStack mt="$1">
-                {accounts.map(acc => (
-                  <AccountCard
-                    key={acc.id}
-                    title={acc.nombre}
-                    amount={fmtMoney2(Number(acc.cantidad))}
-                    icon="wallet"
-                    isMenuOpen={openMenuId === acc.id}
-                    onOpenMenu={() => setOpenMenuId(acc.id)}
-                    onCloseMenu={() => setOpenMenuId(null)}
-                    onEdit={() => startEditAccount(acc)}
-                    onDelete={() => setConfirmDeleteAcc(acc)}
-                  />
-                ))}
+                {accounts.map((acc, idx) => (
+  <AccountCard
+    key={acc.id}
+    title={acc.nombre}
+    amount={fmtMoney2(Number(acc.cantidad))}
+    icon="wallet"
+    isMenuOpen={openMenuId === acc.id}
+    onOpenMenu={() => setOpenMenuId(acc.id)}
+    onCloseMenu={() => setOpenMenuId(null)}
+    onEdit={() => startEditAccount(acc)}
+    onDelete={() => setConfirmDeleteAcc(acc)}
+    shadowColor={ACCOUNT_SHADOW_COLORS[idx % ACCOUNT_SHADOW_COLORS.length]} // color dinámico
+  />
+))}
               </HStack>
             </ScrollView>
-          )}
-
-          {actionLoading && (
-            <Box position="absolute" top={0} left={0} right={0} bottom={0} zIndex={100} bg="rgba(255,255,255,0.7)" alignItems="center" justifyContent="center">
-              <Spinner size="large" color="$red600" />
-              <Text mt="$3" color="$red600">Procesando...</Text>
-            </Box>
           )}
         </VStack>
 
@@ -608,7 +606,7 @@ export default function HomeScreen({
                 {porDias?.periodo ? porDias.periodo : 'Últimos 30 días'}
               </Text>
             </VStack>
-            {loadingCharts && (
+            {(loadingCharts || loadingRegistros) && (
               <HStack space="$1" alignItems="center">
                 <Spinner size="small" />
                 <Text color="$coolGray500" fontSize="$xs">Actualizando…</Text>
@@ -616,45 +614,45 @@ export default function HomeScreen({
             )}
           </HStack>
 
-          {/* KPIs con explicación */}
+          {/* KPIs */}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingRight: 24 }}>
             <HStack mt="$1">
               <KpiCard
                 label="Saldo total"
-                value={analytics.kpis.saldo.value}
-                delta={analytics.kpis.saldo.delta}
-                positive={analytics.kpis.saldo.positive}
+                value={fmtMoney(Number(resumen?.total_saldo ?? 0))}
+                delta={pct(Number(resumen?.total_saldo ?? 0) - Number(resumen?.saldo_inicial ?? 0), Math.abs(Number(resumen?.saldo_inicial ?? 0)))}
+                positive={(Number(resumen?.total_saldo ?? 0) - Number(resumen?.saldo_inicial ?? 0)) >= 0}
                 icon="wallet"
-                info={analytics.kpis.saldo.info}
+                info="Variación del saldo final vs el saldo inicial. (Saldo final − Saldo inicial) / Saldo inicial."
               />
               <KpiCard
                 label="Gastos (mes)"
-                value={analytics.kpis.gastos.value}
-                delta={analytics.kpis.gastos.delta}
+                value={fmtMoney(Number(resumen?.gastos_mes ?? 0))}
+                delta={pct(Number(resumen?.gastos_mes ?? 0), Number(resumen?.ingresos_mes ?? 0))}
                 positive={false}
                 icon="cash-remove"
-                info={analytics.kpis.gastos.info}
+                info="Porcentaje de ingresos gastado. Gastos / Ingresos."
               />
               <KpiCard
                 label="Ingresos (mes)"
-                value={analytics.kpis.ingresos.value}
-                delta={analytics.kpis.ingresos.delta}
+                value={fmtMoney(Number(resumen?.ingresos_mes ?? 0))}
+                delta={pct(Number(resumen?.ingresos_mes ?? 0), Math.abs(Number(resumen?.ingresos_mes ?? 0)) + Math.abs(Number(resumen?.gastos_mes ?? 0)))}
                 positive
                 icon="cash-plus"
-                info={analytics.kpis.ingresos.info}
+                info="Ingresos / (Ingresos + |Gastos|)."
               />
               <KpiCard
                 label="Balance (mes)"
-                value={analytics.kpis.balance.value}
-                delta={analytics.kpis.balance.delta}
-                positive={analytics.kpis.balance.positive}
+                value={fmtMoney(Number(resumen?.ingresos_mes ?? 0) - Number(resumen?.gastos_mes ?? 0))}
+                delta={pct(Number(resumen?.ingresos_mes ?? 0) - Number(resumen?.gastos_mes ?? 0), Math.abs(Number(resumen?.ingresos_mes ?? 0)) + Math.abs(Number(resumen?.gastos_mes ?? 0)))}
+                positive={(Number(resumen?.ingresos_mes ?? 0) - Number(resumen?.gastos_mes ?? 0)) >= 0}
                 icon="trending-up"
-                info={analytics.kpis.balance.info}
+                info="Eficiencia neta. (Ingresos − Gastos) / (Ingresos + |Gastos|)."
               />
             </HStack>
           </ScrollView>
 
-          {/* Gráfica */}
+          {/* ===== ÚNICA GRÁFICA: últimos 5 registros (todas las cuentas) ===== */}
           <Box
             bg="$white"
             borderRadius="$xl"
@@ -664,38 +662,64 @@ export default function HomeScreen({
             style={{ shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 2, overflow: 'hidden' }}
           >
             <HStack justifyContent="space-between" alignItems="center" mb="$2">
-              <Text color="$coolGray600" fontSize="$xs">{analytics.rangoTexto}</Text>
-              <HStack space="$2" alignItems="center">
+              <Text color="$coolGray600" fontSize="$xs">
+                {chartPts.rangoTexto || 'Últimos 5 registros · todas las cuentas'}
+              </Text>
+              <HStack space="$3" alignItems="center">
+                {axisY.scaleNote ? (
+                  <Text color="$coolGray500" fontSize="$xs">{axisY.scaleNote}</Text>
+                ) : null}
                 <Box w={10} h={10} borderRadius="$full" bg="$coolGray200" />
-                <Text color="$coolGray600" fontSize="$xs">Tendencia</Text>
+                <Text color="$coolGray600" fontSize="$xs">Últimos 5 registros</Text>
               </HStack>
             </HStack>
 
             <Box h={188}>
-              <AreaChart
-                style={{ height: 188 }}
-                data={analytics.serieSaldo}
-                contentInset={{ top: 20, bottom: 20 }}
-                curve={analytics.serieSaldo.length < 3 ? shape.curveLinear : shape.curveMonotoneX}
-                svg={{ fill: 'url(#homeGradient)', stroke: '#4f46e5', strokeWidth: 2 }}
-              >
-                <Grid svg={{ strokeOpacity: 0.12 }} />
-                <Gradient />
-              </AreaChart>
+              {!chartPts.pts || chartPts.pts.length < 2 ? (
+                <HStack flex={1} alignItems="center" justifyContent="center">
+                  <Text color="$coolGray500" fontSize="$xs">No hay suficientes movimientos para graficar.</Text>
+                </HStack>
+              ) : (
+                <HStack alignItems="stretch" style={{ height: 188 }}>
+                  <YAxis
+                    style={{ width: 34, marginRight: 8 }}
+                    data={chartPts.pts}
+                    min={axisY.yMin ?? chartPts.yMinDesired}
+                    max={axisY.yMax ?? chartPts.yMaxDesired}
+                    numberOfTicks={5}
+                    contentInset={{ top: 16, bottom: 1 }}
+                    svg={{ fill: '#64748b', fontSize: 10 }}
+                    formatLabel={(value) =>
+                      `${Number(value).toLocaleString('es-MX', { maximumFractionDigits: 1, minimumFractionDigits: 0 })}${axisY.axisSuffix || chartPts.axisSuffix}`
+                    }
+                  />
+                  <Box flex={1}>
+                    <AreaChart
+                      style={{ height: 188 }}
+                      data={chartPts.pts}
+                      yMin={axisY.yMin ?? chartPts.yMinDesired}
+                      yMax={axisY.yMax ?? chartPts.yMaxDesired}
+                      contentInset={{ top: 16, bottom: 1 }}
+                      curve={shape.curveMonotoneX}
+                      svg={{ fill: 'url(#last5Gradient)', stroke: CHART_COLOR, strokeWidth: 2 }}
+                    >
+                      <Grid svg={{ strokeOpacity: 0.12 }} />
+                      <Gradient color={CHART_COLOR} />
+                      <Decorator />
+                    </AreaChart>
+                  </Box>
+                </HStack>
+              )}
             </Box>
           </Box>
         </VStack>
 
-        {/* ===== Resumen de registros (últimos 2) ===== */}
+        {/* ===== Resumen de registros (últimos 3 de todas las cuentas) ===== */}
         <VStack px="$6" mt="$6" space="$3" mb="$8">
           <HStack alignItems="center" justifyContent="space-between">
             <VStack>
               <Text fontWeight="$bold" fontSize="$md" color="$black">Resumen de registros</Text>
-              <Text color="$coolGray500" fontSize="$xs">
-                {accounts?.[0]?.id
-                  ? `Últimos 2 movimientos · ${accountNameById.get(accounts[0].id) || 'Cuenta'}`
-                  : 'Sin cuenta seleccionada'}
-              </Text>
+              <Text color="$coolGray500" fontSize="$xs">Últimos 3 movimientos · todas las cuentas</Text>
             </VStack>
             <Button variant="outline" size="sm" bg="$white" borderColor="$coolGray300" onPress={onMenu}>
               <ButtonText color="$black">Ver todo</ButtonText>
@@ -704,11 +728,11 @@ export default function HomeScreen({
 
           {loadingRegistros ? (
             <Text color="$coolGray500" fontSize="$xs">Cargando movimientos…</Text>
-          ) : lastTwo.length === 0 ? (
-            <Text color="$coolGray500" fontSize="$xs">No hay movimientos para esta cuenta.</Text>
+          ) : lastThree.length === 0 ? (
+            <Text color="$coolGray500" fontSize="$xs">No hay movimientos.</Text>
           ) : (
             <VStack space="$4">
-              {lastTwo.map((mov) => {
+              {lastThree.map((mov) => {
                 const n = Number(mov.monto || 0);
                 const methodName = metodosMap.get(mov.categori_metodos_id);
                 const subcatName = subcatsMap.get(mov.subCategorias_id);
@@ -735,7 +759,7 @@ export default function HomeScreen({
                       </VStack>
                     </HStack>
                     <Text fontWeight="$semibold" color={colorBySign(n)}>
-                      {formatSigned(n)}
+                      {moneySign(n)} {fmtMoney2(Math.abs(n))}
                     </Text>
                   </HStack>
                 );
@@ -747,7 +771,7 @@ export default function HomeScreen({
         <Divider bg="$coolGray200" mx="$6" />
       </ScrollView>
 
-      {/* Modal ELIMINAR cuenta: sin strings sueltos */}
+      {/* Modal ELIMINAR cuenta */}
       {confirmDeleteAcc && (
         <Box position="absolute" top={0} left={0} right={0} bottom={0} bg="rgba(0,0,0,0.35)" zIndex={200} alignItems="center" justifyContent="center">
           <Box w="90%" maxW={420} bg="$white" p="$4" borderRadius="$2xl" borderWidth={1} borderColor="$coolGray200">

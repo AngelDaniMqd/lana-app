@@ -1,23 +1,48 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ScrollView } from 'react-native';
 import {
-  Box, VStack, HStack, Text, Button, ButtonText, Icon, Pressable, Spinner,
+  Box, VStack, HStack, Text, Button, ButtonText, Icon, Pressable, Spinner, Divider,
   FormControl, FormControlLabel, FormControlLabelText, FormControlError, FormControlErrorText,
   Select, SelectTrigger, SelectInput, SelectIcon, SelectPortal, SelectBackdrop, SelectContent, SelectItem,
-  Divider,
   Radio, RadioGroup, RadioIcon, RadioIndicator, RadioLabel,
 } from '@gluestack-ui/themed';
 import { MaterialIcons } from '@expo/vector-icons';
 import AppMenuPopover from '../components/AppMenuPopover';
 import { getCategorias, getSubcategorias, getCuentas, postRegistro } from '../api';
 
-const keypad = [
-  ['7', '8', '9', '/'],
-  ['4', '5', '6', '*'],
-  ['1', '2', '3', '-'],
-  ['.', '0', '←', '+'],
+// === Teclado sin ".", sin *, sin /, sin +, sin - ===
+const KEYS = [
+  ['7', '8', '9'],
+  ['4', '5', '6'],
+  ['1', '2', '3'],
+  [' ','0', '←'],
 ];
+
+const KeyButton = React.memo(function KeyButton({ label, onPress, onLongPress }) {
+  const isBack = label === '←';
+  const variant = isBack ? 'outline' : 'solid';
+  const bg = variant === 'solid' ? '$coolGray100' : '$white';
+  return (
+    <Button
+      onPress={() => onPress(label)}
+      onLongPress={isBack ? onLongPress : undefined}
+      variant={variant}
+      bg={bg}
+      borderColor="$coolGray300"
+      borderWidth={1}
+      borderRadius="$lg"
+      w="$20"
+      h="$20"
+      justifyContent="center"
+      alignItems="center"
+    >
+      <ButtonText fontSize="$2xl" color="$black">
+        {label}
+      </ButtonText>
+    </Button>
+  );
+});
 
 export default function CalculatorScreen({
   token,
@@ -32,11 +57,10 @@ export default function CalculatorScreen({
   // ---------- Estado del formulario ----------
   const [form, setForm] = useState({
     metodo: 'gasto', // 'ingreso' | 'gasto'
-    monto: '',
+    monto: '',       // SIN signo; solo dígitos
     categoriaId: '',
     subcategoriaId: '',
     cuentaId: '',
-    metodoPagoId: '',
   });
 
   // ---------- Catálogos ----------
@@ -45,13 +69,18 @@ export default function CalculatorScreen({
   const [cuentas, setCuentas] = useState([]);
   const [loadingCatalogs, setLoadingCatalogs] = useState(true);
 
-  const validMoney = (v) => /^-?\d+([.,]\d{1,2})?$/.test(String(v).replace(',', '.'));
-  const isValid =
-    form.monto &&
-    validMoney(form.monto) &&
-    form.categoriaId &&
-    form.subcategoriaId &&
-    form.cuentaId;
+  // Solo enteros (sin punto)
+  const validMoney = useCallback((v) => /^\d+$/.test(String(v)), []);
+
+  const isValid = useMemo(() => {
+    return (
+      form.monto &&
+      validMoney(form.monto) &&
+      form.categoriaId &&
+      form.subcategoriaId &&
+      form.cuentaId
+    );
+  }, [form, validMoney]);
 
   const filteredSubcats = useMemo(() => {
     if (!form.categoriaId) return [];
@@ -64,11 +93,7 @@ export default function CalculatorScreen({
     let mounted = true;
     setLoadingCatalogs(true);
 
-    Promise.allSettled([
-      getCategorias(token),
-      getSubcategorias(token),
-      getCuentas(token)
-    ])
+    Promise.allSettled([getCategorias(token), getSubcategorias(token), getCuentas(token)])
       .then(([r1, r2, r3]) => {
         if (!mounted) return;
         if (r1.status === 'fulfilled') setCategorias(r1.value || []);
@@ -81,39 +106,50 @@ export default function CalculatorScreen({
   }, [token]);
 
   // ---------- Teclado ----------
-  const isOperator = (k) => ['/', '*', '-', '+'].includes(k);
+  const handleKeyPress = useCallback((key) => {
+    setForm((prev) => {
+      let monto = prev.monto || '';
 
-  const handleKeyPress = (key) => {
-    if (key === '←') {
-      setForm((f) => ({ ...f, monto: f.monto.length ? f.monto.slice(0, -1) : '' }));
-      return;
-    }
-    if (isOperator(key)) {
-      // Solo permite un signo al inicio
-      if (form.monto.length === 0 && (key === '-' || key === '+')) {
-        setForm((f) => ({ ...f, monto: key }));
+      if (key === '←') {
+        return { ...prev, monto: monto.length ? monto.slice(0, -1) : '' };
       }
-      return;
-    }
-    if (key === '.' && form.monto.includes('.')) return;
-    setForm((f) => ({ ...f, monto: f.monto === '0' && key !== '.' ? key : f.monto + key }));
-  };
 
-  const handleBackspaceLong = () => setForm((f) => ({ ...f, monto: '' }));
+      // Solo dígitos
+      if (/^\d$/.test(key)) {
+        if (monto === '0') {
+          // Reemplaza el 0 inicial por el nuevo dígito
+          return { ...prev, monto: key };
+        }
+        return { ...prev, monto: monto + key };
+      }
+
+      return prev;
+    });
+  }, []);
+
+  const handleBackspaceLong = useCallback(() => {
+    setForm((f) => ({ ...f, monto: '' }));
+  }, []);
 
   // ---------- Guardar ----------
-  const handleSubmit = async () => {
+  const handleSubmit = useCallback(async () => {
     if (!isValid) {
       alert('Verifica todos los campos obligatorios.');
       return;
     }
+
+    // Aplica signo según método
+    let raw = String(form.monto);
+    if (!raw) raw = '0';
+
+    const signedMonto = form.metodo === 'gasto' ? `-${raw}` : raw;
+
     try {
       await postRegistro(
         {
           lista_cuentas_id: Number(form.cuentaId),
           subCategorias_id: Number(form.subcategoriaId),
-          monto: String(form.monto).replace(',', '.'),
-          categori_metodos_id: form.metodoPagoId ? Number(form.metodoPagoId) : 1, // Si tienes método de pago, úsalo, si no, manda 1
+          monto: signedMonto,
         },
         token
       );
@@ -122,7 +158,15 @@ export default function CalculatorScreen({
     } catch (e) {
       alert('Error al guardar el registro');
     }
-  };
+  }, [form.monto, form.metodo, form.cuentaId, form.subcategoriaId, isValid, onSave, token]);
+
+  // Monto mostrado con signo (visual)
+  const displayAmount = useMemo(() => {
+    const base = form.monto || '0';
+    return form.metodo === 'gasto' ? `-${base}` : base;
+  }, [form.monto, form.metodo]);
+
+  const amountColor = form.metodo === 'gasto' ? '$red700' : '$green700';
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }} edges={['top', 'bottom']}>
@@ -135,9 +179,7 @@ export default function CalculatorScreen({
               <Text color="$black">Regresar</Text>
             </HStack>
           </Pressable>
-          <Pressable onPress={handleSubmit}>
-            <Icon as={MaterialIcons} name="check" size={24} color="$black" />
-          </Pressable>
+        
         </HStack>
         <Divider />
 
@@ -153,12 +195,12 @@ export default function CalculatorScreen({
               contentContainerStyle={{ paddingBottom: 16 }}
               showsVerticalScrollIndicator={false}
             >
-              {/* Método */}
+              {/* Método (elige el signo) */}
               <VStack px="$6" py="$4" space="$3">
                 <Text fontWeight="$bold" fontSize="$md" color="$black">Selecciona Método:</Text>
                 <RadioGroup
                   value={form.metodo}
-                  onChange={(v) => setForm((f) => ({ ...f, metodo: String(v), monto: f.monto.startsWith('-') || f.monto.startsWith('+') ? '' : f.monto }))}
+                  onChange={(v) => setForm((f) => ({ ...f, metodo: String(v) }))}
                   direction="row"
                   space="$10"
                 >
@@ -200,9 +242,9 @@ export default function CalculatorScreen({
                     fontSize="$5xl"
                     fontWeight="$bold"
                     textAlign="center"
-                    color={form.metodo === 'gasto' ? '$black' : '$green700'}
+                    color={amountColor}
                   >
-                    {form.monto || (form.metodo === 'gasto' ? '-' : '+') + '0'}
+                    {displayAmount}
                   </Text>
                 </Box>
               </VStack>
@@ -278,29 +320,29 @@ export default function CalculatorScreen({
                   <FormControlLabel>
                     <FormControlLabelText fontWeight="$bold" color="$black">Subcategoría</FormControlLabelText>
                   </FormControlLabel>
-                  <Select
-                    isDisabled={!form.categoriaId}
-                    selectedValue={form.subcategoriaId}
-                    onValueChange={(v) => setForm((f) => ({ ...f, subcategoriaId: v }))}
-                  >
-                    <SelectTrigger borderColor="$coolGray300" bg="$white">
-                      <SelectInput placeholder={form.categoriaId ? 'Selecciona una subcategoría' : 'Primero elige una categoría'} />
-                      <SelectIcon as={MaterialIcons} name="expand-more" />
-                    </SelectTrigger>
-                    <SelectPortal>
-                      <SelectBackdrop />
-                      <SelectContent>
-                        {filteredSubcats.map((s) => (
-                          <SelectItem key={s.id} value={String(s.id)} label={s.descripcion} />
-                        ))}
-                      </SelectContent>
-                    </SelectPortal>
-                  </Select>
-                  {!form.subcategoriaId && (
-                    <FormControlError mt="$1">
-                      <FormControlErrorText>Selecciona una subcategoría.</FormControlErrorText>
-                    </FormControlError>
-                  )}
+                <Select
+                  isDisabled={!form.categoriaId}
+                  selectedValue={form.subcategoriaId}
+                  onValueChange={(v) => setForm((f) => ({ ...f, subcategoriaId: v }))}
+                >
+                  <SelectTrigger borderColor="$coolGray300" bg="$white">
+                    <SelectInput placeholder={form.categoriaId ? 'Selecciona una subcategoría' : 'Primero elige una categoría'} />
+                    <SelectIcon as={MaterialIcons} name="expand-more" />
+                  </SelectTrigger>
+                  <SelectPortal>
+                    <SelectBackdrop />
+                    <SelectContent>
+                      {filteredSubcats.map((s) => (
+                        <SelectItem key={s.id} value={String(s.id)} label={s.descripcion} />
+                      ))}
+                    </SelectContent>
+                  </SelectPortal>
+                </Select>
+                {!form.subcategoriaId && (
+                  <FormControlError mt="$1">
+                    <FormControlErrorText>Selecciona una subcategoría.</FormControlErrorText>
+                  </FormControlError>
+                )}
                 </FormControl>
               </VStack>
 
@@ -315,41 +357,18 @@ export default function CalculatorScreen({
             </ScrollView>
 
             {/* Teclado numérico */}
-            <Box
-              px="$6"
-              pt="$3"
-              pb="$5"
-              bg="$white"
-              borderTopWidth={1}
-              borderTopColor="$coolGray200"
-            >
+            <Box px="$6" pt="$3" pb="$5" bg="$white" borderTopWidth={1} borderTopColor="$coolGray200">
               <VStack space="$3">
-                {keypad.map((row, i) => (
+                {KEYS.map((row, i) => (
                   <HStack key={i} space="$3" justifyContent="space-between">
-                    {row.map((key) => {
-                      const operator = isOperator(key) || key === '←';
-                      const isBack = key === '←';
-                      return (
-                        <Button
-                          key={key}
-                          onPress={() => handleKeyPress(key)}
-                          onLongPress={isBack ? handleBackspaceLong : undefined}
-                          variant={operator ? 'outline' : 'solid'}
-                          bg={operator ? '$white' : '$coolGray100'}
-                          borderColor="$coolGray300"
-                          borderWidth={1}
-                          borderRadius="$lg"
-                          w="$20"
-                          h="$20"
-                          justifyContent="center"
-                          alignItems="center"
-                        >
-                          <ButtonText fontSize="$2xl" color="$black">
-                            {key}
-                          </ButtonText>
-                        </Button>
-                      );
-                    })}
+                    {row.map((label) => (
+                      <KeyButton
+                        key={label}
+                        label={label}
+                        onPress={handleKeyPress}
+                        onLongPress={handleBackspaceLong}
+                      />
+                    ))}
                   </HStack>
                 ))}
               </VStack>

@@ -321,6 +321,16 @@ export async function getRegistros(token) {
  * @param {object} data - { lista_cuentas_id, subCategorias_id, monto, categori_metodos_id }
  */
 export async function postRegistro(data, token) {
+  // Construye el payload omitiendo nulos/vacíos y forzando string
+  const payload = {
+    lista_cuentas_id: String(data.lista_cuentas_id),
+    subCategorias_id: String(data.subCategorias_id),
+    monto: String(data.monto),
+  };
+  if (data.categori_metodos_id !== undefined && data.categori_metodos_id !== null && data.categori_metodos_id !== '') {
+    payload.categori_metodos_id = String(data.categori_metodos_id);
+  }
+
   const res = await fetch(`${API_BASE_URL}/registros/`, {
     method: 'POST',
     headers: {
@@ -328,16 +338,13 @@ export async function postRegistro(data, token) {
       'Content-Type': 'application/x-www-form-urlencoded',
       Accept: 'application/json',
     },
-    body: new URLSearchParams({
-      lista_cuentas_id: data.lista_cuentas_id,
-      subCategorias_id: data.subCategorias_id,
-      monto: data.monto,
-      categori_metodos_id: data.categori_metodos_id,
-    }).toString(),
+    body: new URLSearchParams(payload).toString(),
   });
+
   if (!res.ok) {
-    const err = await res.text().catch(() => '');
-    throw new Error(err || 'No se pudo crear el registro');
+    // ayuda extra para depurar
+    const msg = await res.text().catch(() => '');
+    throw new Error(msg || 'No se pudo crear el registro');
   }
   return await res.json();
 }
@@ -372,6 +379,348 @@ export async function deleteRegistro(registroId, token) {
   if (!res.ok) {
     const err = await res.text().catch(() => '');
     throw new Error(err || 'No se pudo eliminar el registro');
+  }
+  try {
+    return await res.json();
+  } catch {
+    return { ok: true };
+  }
+}
+
+
+// ====== Deudas (CRUD) ======
+export async function getDeudas(token) {
+  const res = await fetch(`${API_BASE_URL}/deudas/`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+    },
+  });
+  if (!res.ok) throw new Error('No se pudieron obtener las deudas');
+  return await res.json();
+}
+
+/**
+ * Crea una deuda
+ * @param {object} data - { nombre, monto, fecha_inicio (ISO), fecha_vencimiento (ISO), descripcion, categori_metodos_id }
+ */
+export async function postDeuda(data, token) {
+  const body = new URLSearchParams({
+    nombre: String(data.nombre),
+    monto: String(data.monto),
+    fecha_inicio: String(data.fecha_inicio),         // ISO
+    fecha_vencimiento: String(data.fecha_vencimiento), // ISO
+    descripcion: String(data.descripcion ?? ''),
+    categori_metodos_id: String(data.categori_metodos_id),
+  }).toString();
+
+  const res = await fetch(`${API_BASE_URL}/deudas/`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Accept: 'application/json',
+    },
+    body,
+  });
+
+  if (!res.ok) {
+    const msg = await res.text().catch(() => '');
+    throw new Error(msg || 'No se pudo crear la deuda');
+  }
+  return await res.json();
+}
+
+/**
+ * Actualiza una deuda
+ * @param {number|string} deudaId
+ * @param {object} data - campos opcionales
+ */
+export async function putDeuda(deudaId, data, token) {
+  const payload = new URLSearchParams(
+    Object.entries({
+      ...(data.nombre != null ? { nombre: data.nombre } : {}),
+      ...(data.monto != null ? { monto: data.monto } : {}),
+      ...(data.fecha_inicio != null ? { fecha_inicio: data.fecha_inicio } : {}),
+      ...(data.fecha_vencimiento != null ? { fecha_vencimiento: data.fecha_vencimiento } : {}),
+      ...(data.descripcion != null ? { descripcion: data.descripcion } : {}),
+      ...(data.categori_metodos_id != null ? { categori_metodos_id: data.categori_metodos_id } : {}),
+    }).reduce((acc, [k, v]) => ((acc[k] = String(v)), acc), {})
+  ).toString();
+
+  const res = await fetch(`${API_BASE_URL}/deudas/${deudaId}`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Accept: 'application/json',
+    },
+    body: payload,
+  });
+
+  if (!res.ok) {
+    const msg = await res.text().catch(() => '');
+    throw new Error(msg || 'No se pudo actualizar la deuda');
+  }
+  return await res.json();
+}
+
+export async function deleteDeuda(deudaId, token) {
+  const res = await fetch(`${API_BASE_URL}/deudas/${deudaId}`, {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => '');
+    throw new Error(msg || 'No se pudo eliminar la deuda');
+  }
+  try {
+    return await res.json();
+  } catch {
+    return { ok: true };
+  }
+}
+
+
+
+/* ================== Objetivos (CRUD + estado + aportes) ================== */
+
+export async function getObjetivos(token, estado) {
+  let url = `${API_BASE_URL}/objetivos/`;
+  if (estado) url += `?estado=${encodeURIComponent(estado)}`;
+  const res = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+    },
+  });
+  if (!res.ok) throw new Error('No se pudieron obtener los objetivos');
+  return await res.json();
+}
+
+export async function postObjetivo(data, token) {
+  const res = await fetch(`${API_BASE_URL}/objetivos/`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({
+      nombre: String(data.nombre),
+      tipo: String(data.tipo),
+      monto_meta: Number(data.monto_meta),
+      fecha_inicio: String(data.fecha_inicio),
+      fecha_vencimiento: String(data.fecha_vencimiento),
+    }),
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => '');
+    throw new Error(msg || 'No se pudo crear el objetivo');
+  }
+  return await res.json();
+}
+
+export async function putObjetivo(objetivoId, data, token) {
+  const res = await fetch(`${API_BASE_URL}/objetivos/${objetivoId}`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({
+      ...(data.nombre != null ? { nombre: String(data.nombre) } : {}),
+      ...(data.tipo != null ? { tipo: String(data.tipo) } : {}),
+      ...(data.monto_meta != null ? { monto_meta: Number(data.monto_meta) } : {}),
+      ...(data.fecha_inicio != null ? { fecha_inicio: String(data.fecha_inicio) } : {}),
+      ...(data.fecha_vencimiento != null ? { fecha_vencimiento: String(data.fecha_vencimiento) } : {}),
+    }),
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => '');
+    throw new Error(msg || 'No se pudo actualizar el objetivo');
+  }
+  return await res.json();
+}
+
+export async function deleteObjetivo(objetivoId, token) {
+  const res = await fetch(`${API_BASE_URL}/objetivos/${objetivoId}`, {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => '');
+    throw new Error(msg || 'No se pudo eliminar el objetivo');
+  }
+  return { ok: true };
+}
+
+export async function patchObjetivoEstado(objetivoId, estado, token) {
+  const res = await fetch(`${API_BASE_URL}/objetivos/${objetivoId}/estado`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({ estado: String(estado) }),
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => '');
+    throw new Error(msg || 'No se pudo cambiar el estado');
+  }
+  return await res.json();
+}
+
+// (Opcional) Aportes
+export async function postAporte(objetivoId, { monto, nota = '' }, token) {
+  const res = await fetch(`${API_BASE_URL}/objetivos/${objetivoId}/aportes`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({ monto: Number(monto), nota: String(nota) }),
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => '');
+    throw new Error(msg || 'No se pudo crear el aporte');
+  }
+  return await res.json();
+}
+
+export async function getAportes(objetivoId, token) {
+  const res = await fetch(`${API_BASE_URL}/objetivos/${objetivoId}/aportes`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+    },
+  });
+  if (!res.ok) throw new Error('No se pudieron obtener los aportes');
+  return await res.json();
+}
+
+
+
+
+/* ================== Presupuestos (CRUD) ================== */
+
+export async function getPresupuestos(token) {
+  const res = await fetch(`${API_BASE_URL}/presupuestos/`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+    },
+  });
+  if (!res.ok) throw new Error('No se pudieron obtener los presupuestos');
+  return await res.json();
+}
+
+export async function getPresupuestosMesAno(mes, ano, token) {
+  const res = await fetch(`${API_BASE_URL}/presupuestos/mes/${encodeURIComponent(mes)}/ano/${encodeURIComponent(ano)}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+    },
+  });
+  if (!res.ok) {
+    // fallback amable (algunos deploys devuelven 404 si no hay data)
+    const txt = await res.text().catch(() => '');
+    throw new Error(txt || 'No se pudieron obtener los presupuestos por mes/año');
+  }
+  return await res.json();
+}
+
+export async function getPresupuestosCompleto(token) {
+  const res = await fetch(`${API_BASE_URL}/presupuestos/completo`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(txt || 'No se pudo obtener el listado completo de presupuestos');
+  }
+  // Algunos backends devuelven string aquí; intenta parsear JSON si aplica
+  try {
+    return await res.json();
+  } catch {
+    return [];
+  }
+}
+
+export async function postPresupuesto({ categorias_id, monto_limite, mes, ano }, token) {
+  const body = new URLSearchParams({
+    categorias_id: String(categorias_id),
+    monto_limite: String(monto_limite),
+    mes: String(mes),
+    ano: String(ano),
+  }).toString();
+
+  const res = await fetch(`${API_BASE_URL}/presupuestos/`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Accept: 'application/json',
+    },
+    body,
+  });
+
+  if (!res.ok) {
+    const msg = await res.text().catch(() => '');
+    throw new Error(msg || 'No se pudo crear el presupuesto');
+  }
+  return await res.json();
+}
+
+export async function putPresupuesto(presupuestoId, data, token) {
+  const payload = new URLSearchParams(
+    Object.entries({
+      ...(data.categorias_id != null ? { categorias_id: data.categorias_id } : {}),
+      ...(data.monto_limite != null ? { monto_limite: data.monto_limite } : {}),
+      ...(data.mes != null ? { mes: data.mes } : {}),
+      ...(data.ano != null ? { ano: data.ano } : {}),
+    }).reduce((acc, [k, v]) => ((acc[k] = String(v)), acc), {})
+  ).toString();
+
+  const res = await fetch(`${API_BASE_URL}/presupuestos/${presupuestoId}`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Accept: 'application/json',
+    },
+    body: payload,
+  });
+
+  if (!res.ok) {
+    const msg = await res.text().catch(() => '');
+    throw new Error(msg || 'No se pudo actualizar el presupuesto');
+  }
+  return await res.json();
+}
+
+export async function deletePresupuesto(presupuestoId, token) {
+  const res = await fetch(`${API_BASE_URL}/presupuestos/${presupuestoId}`, {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => '');
+    throw new Error(msg || 'No se pudo eliminar el presupuesto');
   }
   try {
     return await res.json();

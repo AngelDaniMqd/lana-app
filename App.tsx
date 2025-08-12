@@ -237,6 +237,7 @@ export default function App() {
   } else if (currentScreen === 'budgets') {
     ScreenComponent = (
       <BudgetsScreen
+        token={token}
         onMenu={go('records')}
         onStatistics={go('statistics')}
         onDebts={go('debts')}
@@ -313,6 +314,8 @@ export default function App() {
   } else if (currentScreen === 'debts') {
     ScreenComponent = (
       <DebtsScreen
+      
+       token={token}
         onMenu={go('records')}
         onStatistics={go('statistics')}
         onDebts={go('debts')}
@@ -328,6 +331,7 @@ export default function App() {
   } else if (currentScreen === 'goals') {
     ScreenComponent = (
       <GoalsScreen
+      token={token}
         onMenu={go('records')}
         onRecurring={go('recurring')}
         onAdd={go('calculator')}

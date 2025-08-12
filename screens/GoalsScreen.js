@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { StyleSheet, Platform } from 'react-native';
 import {
   Box, VStack, HStack, Text, Button, Icon, Pressable, ScrollView, ButtonText,
   Input, InputField, InputSlot, InputIcon,
@@ -7,13 +8,23 @@ import {
   SelectContent, SelectItem,
   FormControl, FormControlLabel, FormControlLabelText, FormControlHelper, FormControlHelperText,
   Popover, PopoverBackdrop, PopoverContent, PopoverArrow, PopoverBody,
+  Spinner,
 } from '@gluestack-ui/themed';
 import { MaterialIcons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { Platform } from 'react-native';
 import AppMenuPopover from '../components/AppMenuPopover';
 
-/* ==== Datos mock (semilla) ==== */
+// API objetivos y aportes
+import {
+  getObjetivos,
+  postObjetivo,
+  putObjetivo,
+  deleteObjetivo,
+  patchObjetivoEstado,
+  postAporte, // <-- NUEVO
+} from '../api';
+
+/* ==== Utils ==== */
 const GOAL_TYPES = [
   { label: 'Ahorro general', value: 'ahorro' },
   { label: 'Vehículo', value: 'vehiculo' },
@@ -21,24 +32,6 @@ const GOAL_TYPES = [
   { label: 'Emergencias', value: 'emergencias' },
 ];
 
-const seedGoals = {
-  activos: [
-    { id: '1', title: 'Vehículo nuevo', date: '27/05/2028', saved: 14000, goal: 100000, type: 'vehiculo' },
-    { id: '2', title: 'Viaje Japón', date: '01/12/2026', saved: 35000, goal: 120000, type: 'viaje' },
-  ],
-  pausado: [
-    { id: '3', title: 'Laptop nueva', date: '15/04/2026', saved: 8000, goal: 30000, type: 'ahorro' },
-  ],
-  completados: [
-    { id: '4', title: 'Fondo emergencias', date: '27/05/2025', saved: 20000, goal: 20000, type: 'emergencias' },
-  ],
-};
-
-/* ==== Utils ==== */
-function parseDDMMYYYY(s) {
-  const [dd, mm, yyyy] = s.split('/').map(Number);
-  return new Date(yyyy, (mm || 1) - 1, dd || 1);
-}
 function formatMX(d) {
   try {
     return d.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' });
@@ -50,24 +43,31 @@ function progressPct(saved, goal) {
   if (!goal || goal <= 0) return 0;
   return Math.max(0, Math.min(100, Math.round((saved / goal) * 100)));
 }
+const isValidAmount = (v) => /^\d+([.,]\d{1,2})?$/.test(String(v).replace(',', '.'));
 
-/* ==== Tabs === */
-const TABS = [
-  { key: 'activos', label: 'Activos' },
-  { key: 'pausado', label: 'Pausado' },
-  { key: 'completados', label: 'Completados' },
-];
+// Loader de pantalla completa reutilizable
+const FullScreenLoader = ({ text = 'Cargando…' }) => (
+  <Box
+    position="absolute"
+    style={StyleSheet.absoluteFillObject}
+    bg="rgba(255,255,255,0.7)"
+    zIndex={999}
+    alignItems="center"
+    justifyContent="center"
+    pointerEvents="auto"
+  >
+    <Spinner size="large" color="$red600" />
+    <Text mt="$2" color="$red600">{text}</Text>
+  </Box>
+);
 
 /* ===== Menú de acciones por tarjeta ===== */
-function GoalActionsMenu({ onEdit, onPause, onComplete, onDelete }) {
+function GoalActionsMenu({ item, onEdit, onPause, onComplete, onDelete, onDeposit, onResume, onRestart }) {
   const [open, setOpen] = useState(false);
+  const estado = String(item.estado || 'activo'); // activo | pausado | completado
 
   const Item = ({ icon, label, onPress, danger = false }) => (
-    <Pressable
-      px="$4"
-      py="$3"
-      onPress={() => { setOpen(false); onPress(); }}
-    >
+    <Pressable px="$4" py="$3" onPress={() => { setOpen(false); onPress(); }}>
       <HStack space="$3" alignItems="center">
         <Icon as={MaterialIcons} name={icon} size={18} color={danger ? '$red600' : '$black'} />
         <Text color={danger ? '$red600' : '$black'}>{label}</Text>
@@ -90,22 +90,37 @@ function GoalActionsMenu({ onEdit, onPause, onComplete, onDelete }) {
           px="$3"
           py="$2"
         >
-          <HStack space="$1" alignItems="center">
-            <Icon as={MaterialIcons} name="more-vert" size={20} color="$black" />
-            <Text color="$black"></Text>
-          </HStack>
+          <Icon as={MaterialIcons} name="more-vert" size={20} color="$black" />
         </Pressable>
       )}
     >
       <PopoverBackdrop />
-      <PopoverContent w={220} p="$0">
+      <PopoverContent w={240} p="$0">
         <PopoverArrow />
         <PopoverBody p="$0">
           <VStack divider={<Box h={1} bg="$coolGray100" />}>
-            <Item icon="edit" label="Editar objetivo" onPress={onEdit} />
-            <Item icon="check-circle" label="Objetivo Logrado" onPress={onComplete} />
-            <Item icon="pause-circle" label="Objetivo Pausado" onPress={onPause} />
-            <Item icon="delete-outline" label="Eliminar Objetivo" onPress={onDelete} danger />
+            {/* Solo activo puede Abonar / Pausar / Completar */}
+            {estado === 'activo' && (
+              <>
+                <Item icon="savings" label="Abonar" onPress={() => onDeposit(item)} />
+                <Item icon="check-circle" label="Marcar como Completado" onPress={() => onComplete(item)} />
+                <Item icon="pause-circle" label="Pausar" onPress={() => onPause(item)} />
+              </>
+            )}
+
+            {/* Pausado → Reanudar */}
+            {estado === 'pausado' && (
+              <Item icon="play-circle" label="Reanudar" onPress={() => onResume(item)} />
+            )}
+
+            {/* Completado → Reiniciar (volver a activo) */}
+            {estado === 'completado' && (
+              <Item icon="restart-alt" label="Reiniciar" onPress={() => onRestart(item)} />
+            )}
+
+            {/* Comunes */}
+            <Item icon="edit" label="Editar" onPress={() => onEdit(item)} />
+            <Item icon="delete-outline" label="Eliminar" onPress={() => onDelete(item)} danger />
           </VStack>
         </PopoverBody>
       </PopoverContent>
@@ -113,23 +128,22 @@ function GoalActionsMenu({ onEdit, onPause, onComplete, onDelete }) {
   );
 }
 
-/* ==== Card de objetivo ==== */
-function GoalCard({ item, onEdit, onPause, onComplete, onDelete }) {
-  const pct = progressPct(item.saved, item.goal);
+/* ==== Card de objetivo (shape API) ==== */
+function GoalCard(props) {
+  const { item } = props;
+  const pct = progressPct(Number(item.monto_ahorrado || 0), Number(item.monto_meta || 0));
   return (
     <Box bg="$white" borderRadius="$xl" p="$4" borderWidth={1} borderColor="$coolGray200">
       <HStack alignItems="center" justifyContent="space-between">
         <VStack>
-          <Text fontWeight="$bold" fontSize="$md" color="$black">{item.title}</Text>
-          <Text color="$coolGray500" fontSize="$xs">Fecha límite {item.date}</Text>
+          <Text fontWeight="$bold" fontSize="$md" color="$black">{item.nombre}</Text>
+          <Text color="$coolGray500" fontSize="$xs">
+            Fecha límite {item.fecha_vencimiento ? formatMX(new Date(item.fecha_vencimiento)) : '—'}
+          </Text>
+          <Text color="$coolGray500" fontSize="$xs">Estado: {String(item.estado || 'activo')}</Text>
         </VStack>
 
-        <GoalActionsMenu
-          onEdit={() => onEdit(item)}
-          onPause={() => onPause(item)}
-          onComplete={() => onComplete(item)}
-          onDelete={() => onDelete(item)}
-        />
+        <GoalActionsMenu {...props} />
       </HStack>
 
       <Box bg="$coolGray200" h={10} borderRadius="$lg" mt="$3" overflow="hidden">
@@ -137,15 +151,19 @@ function GoalCard({ item, onEdit, onPause, onComplete, onDelete }) {
       </Box>
 
       <HStack justifyContent="space-between" mt="$2">
-        <Text color="#2D2DAA" fontWeight="$bold">Ahorrado: MXN {item.saved.toLocaleString('es-MX')}</Text>
-        <Text color="$coolGray600">Meta: MXN {item.goal.toLocaleString('es-MX')}</Text>
+        <Text color="#2D2DAA" fontWeight="$bold">
+          Ahorrado: MXN {Number(item.monto_ahorrado || 0).toLocaleString('es-MX')}
+        </Text>
+        <Text color="$coolGray600">
+          Meta: MXN {Number(item.monto_meta || 0).toLocaleString('es-MX')}
+        </Text>
       </HStack>
     </Box>
   );
 }
 
 export default function GoalsScreen({
-  onAdd = () => {},
+  token,
   onMenu = () => {},
   onDebts = () => {},
   onGoals = () => {},
@@ -158,12 +176,15 @@ export default function GoalsScreen({
   onProfile = () => {},
 }) {
   const [showPopover, setShowPopover] = useState(false);
-  const [tab, setTab] = useState('activos');
+  const [tab, setTab] = useState('activos'); // activos | pausado | completados
 
-  // Estado de objetivos (para mover entre listas)
-  const [goals, setGoals] = useState(seedGoals);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  // Form state
+  const [goals, setGoals] = useState({ activos: [], pausado: [], completados: [] });
+
+  // Form objetivo
   const [showForm, setShowForm] = useState(false);
   const [dateTarget, setDateTarget] = useState(null); // 'start' | 'end'
   const [showPicker, setShowPicker] = useState(false);
@@ -176,44 +197,160 @@ export default function GoalsScreen({
     endDate: new Date(),
   });
 
-  const list = goals[tab];
-  const isValidAmount = (v) => /^\d+([.,]\d{1,2})?$/.test(String(v).replace(',', '.'));
+  // Modal de Abono
+  const [showDeposit, setShowDeposit] = useState(false);
+  const [deposit, setDeposit] = useState({ objetivoId: null, amount: '', note: '' });
+  const [savingDeposit, setSavingDeposit] = useState(false);
+
+  const list = goals[tab] || [];
   const isValid = form.name.trim() && form.type && isValidAmount(form.amount);
+  const isValidDeposit = isValidAmount(deposit.amount) && Number(String(deposit.amount).replace(',', '.')) > 0;
 
-  /* ===== helpers para mover/eliminar ===== */
-  const moveGoal = (goal, from, to) => {
-    setGoals((prev) => ({
-      ...prev,
-      [from]: prev[from].filter((g) => g.id !== goal.id),
-      [to]: [...prev[to], goal],
-    }));
-    if (tab !== to) setTab(to);
+  /* ===== Carga desde API ===== */
+  const fetchAll = async () => {
+    setLoading(true);
+    try {
+      const [a, p, c] = await Promise.all([
+        getObjetivos(token, 'activo'),
+        getObjetivos(token, 'pausado'),
+        getObjetivos(token, 'completado'),
+      ]);
+      setGoals({
+        activos: Array.isArray(a) ? a : [],
+        pausado: Array.isArray(p) ? p : [],
+        completados: Array.isArray(c) ? c : [],
+      });
+    } catch (e) {
+      console.error('Error cargando objetivos:', e?.message || e);
+      setGoals({ activos: [], pausado: [], completados: [] });
+    } finally {
+      setLoading(false);
+      setInitialLoading(false);
+    }
   };
 
-  const deleteGoal = (goal, from) => {
-    setGoals((prev) => ({
-      ...prev,
-      [from]: prev[from].filter((g) => g.id !== goal.id),
-    }));
-  };
+  useEffect(() => {
+    if (!token) return;
+    fetchAll();
+  }, [token]);
 
   /* ===== acciones del menú ===== */
   const handleEdit = (item) => {
     setForm({
-      id: item.id,
-      name: item.title,
-      type: item.type || '',
-      amount: String(item.goal ?? ''),
-      startDate: new Date(),
-      endDate: parseDDMMYYYY(item.date),
+      id: String(item.id),
+      name: item.nombre || '',
+      type: item.tipo || '',
+      amount: String(item.monto_meta ?? ''),
+      startDate: item.fecha_inicio ? new Date(item.fecha_inicio) : new Date(),
+      endDate: item.fecha_vencimiento ? new Date(item.fecha_vencimiento) : new Date(),
     });
     setShowForm(true);
   };
-  const handlePause = (item) => moveGoal(item, tab, 'pausado');
-  const handleComplete = (item) => moveGoal(item, tab, 'completados');
-  const handleDelete = (item) => deleteGoal(item, tab);
 
-  /* ===== alta/edición (botón + y guardar) ===== */
+  const handlePause = async (item) => {
+    try {
+      await patchObjetivoEstado(item.id, 'pausado', token);
+      await fetchAll();
+      setTab('pausado');
+    } catch (e) {
+      console.error('Error pausando objetivo:', e?.message || e);
+      alert('No se pudo pausar el objetivo');
+    }
+  };
+
+  const handleResume = async (item) => {
+    try {
+      await patchObjetivoEstado(item.id, 'activo', token);
+      await fetchAll();
+      setTab('activos');
+    } catch (e) {
+      console.error('Error reanudando objetivo:', e?.message || e);
+      alert('No se pudo reanudar el objetivo');
+    }
+  };
+
+  const handleRestart = async (item) => {
+    // Reiniciar = volver a estado activo (no hay endpoint para resetear ahorrado)
+    try {
+      await patchObjetivoEstado(item.id, 'activo', token);
+      await fetchAll();
+      setTab('activos');
+    } catch (e) {
+      console.error('Error reiniciando objetivo:', e?.message || e);
+      alert('No se pudo reiniciar el objetivo');
+    }
+  };
+
+  const handleComplete = async (item) => {
+    try {
+      await patchObjetivoEstado(item.id, 'completado', token);
+      await fetchAll();
+      setTab('completados');
+    } catch (e) {
+      console.error('Error completando objetivo:', e?.message || e);
+      alert('No se pudo completar el objetivo');
+    }
+  };
+
+  const handleDelete = async (item) => {
+    try {
+      await deleteObjetivo(item.id, token);
+      await fetchAll();
+    } catch (e) {
+      console.error('Error eliminando objetivo:', e?.message || e);
+      alert('No se pudo eliminar el objetivo');
+    }
+  };
+
+  const handleDepositOpen = (item) => {
+    if (String(item.estado) !== 'activo') {
+      alert('Este objetivo no está activo. Reanúdalo o reinícialo para poder abonar.');
+      return;
+    }
+    setDeposit({ objetivoId: item.id, amount: '', note: '' });
+    setShowDeposit(true);
+  };
+
+  const handleDepositSave = async () => {
+    if (!isValidDeposit) return;
+    setSavingDeposit(true);
+    try {
+      const amountNum = Number(String(deposit.amount).replace(',', '.'));
+      await postAporte(deposit.objetivoId, { monto: amountNum, nota: deposit.note || '' }, token);
+
+      // refresca objetivos
+      await fetchAll();
+
+      // Si con el abono se cumple la meta, marcar como completado automáticamente
+      const all = [...goals.activos, ...goals.pausado, ...goals.completados];
+      const updated = all.find(o => String(o.id) === String(deposit.objetivoId));
+      // Si el objetivo ya no está en 'activos' por el timing del fetch, vuelve a buscar en el servidor:
+      const recheckLists = await Promise.all([
+        getObjetivos(token, 'activo'),
+        getObjetivos(token, 'pausado'),
+        getObjetivos(token, 'completado'),
+      ]);
+      const merged = [...(recheckLists[0] || []), ...(recheckLists[1] || []), ...(recheckLists[2] || [])];
+      const fresh = merged.find(o => String(o.id) === String(deposit.objetivoId));
+
+      const obj = fresh || updated;
+      if (obj && Number(obj.monto_meta || 0) > 0 && Number(obj.monto_ahorrado || 0) >= Number(obj.monto_meta || 0) && String(obj.estado) !== 'completado') {
+        await patchObjetivoEstado(obj.id, 'completado', token);
+        await fetchAll();
+        setTab('completados');
+      }
+
+      setShowDeposit(false);
+      setDeposit({ objetivoId: null, amount: '', note: '' });
+    } catch (e) {
+      console.error('Error al abonar:', e?.message || e);
+      alert('No se pudo registrar el abono');
+    } finally {
+      setSavingDeposit(false);
+    }
+  };
+
+  /* ===== alta/edición ===== */
   const handleAddNew = () => {
     setForm({
       id: '',
@@ -226,42 +363,32 @@ export default function GoalsScreen({
     setShowForm(true);
   };
 
-  const saveForm = () => {
+  const saveForm = async () => {
     if (!isValid) return;
-    if (form.id) {
-      // editar: buscar en todas las listas y actualizar
-      setGoals((prev) => {
-        const update = (arr) =>
-          arr.map((g) =>
-            g.id === form.id
-              ? {
-                  ...g,
-                  title: form.name,
-                  type: form.type,
-                  goal: Number(String(form.amount).replace(',', '.')),
-                  date: formatMX(form.endDate),
-                }
-              : g
-          );
-        return {
-          activos: update(prev.activos),
-          pausado: update(prev.pausado),
-          completados: update(prev.completados),
-        };
-      });
-    } else {
-      // crear nuevo en la pestaña actual
-      const newGoal = {
-        id: Date.now().toString(),
-        title: form.name,
-        type: form.type,
-        goal: Number(String(form.amount).replace(',', '.')),
-        saved: 0,
-        date: formatMX(form.endDate),
+    setSaving(true);
+    try {
+      const payload = {
+        nombre: form.name.trim(),
+        tipo: form.type,
+        monto_meta: Number(String(form.amount).replace(',', '.')),
+        fecha_inicio: form.startDate.toISOString(),
+        fecha_vencimiento: form.endDate.toISOString(),
       };
-      setGoals((prev) => ({ ...prev, [tab]: [...prev[tab], newGoal] }));
+
+      if (form.id) {
+        await putObjetivo(form.id, payload, token);
+      } else {
+        await postObjetivo(payload, token); // estado inicial = activo
+      }
+      setShowForm(false);
+      if (!form.id) setTab('activos');
+      await fetchAll();
+    } catch (e) {
+      console.error('Error guardando objetivo:', e?.message || e);
+      alert('No se pudo guardar el objetivo');
+    } finally {
+      setSaving(false);
     }
-    setShowForm(false);
   };
 
   const openDate = (which) => {
@@ -297,9 +424,7 @@ export default function GoalsScreen({
             <Text color="$black">Regresar</Text>
           </HStack>
         </Pressable>
-        <Pressable disabled={!isValid} onPress={saveForm} opacity={isValid ? 1 : 0.4}>
-          <Icon as={MaterialIcons} name="check" size="xl" color="$black" />
-        </Pressable>
+      
       </HStack>
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 28 }}>
@@ -336,11 +461,15 @@ export default function GoalsScreen({
                 <InputField
                   placeholder="Ej. Vehículo nuevo"
                   value={form.name}
+                  maxLength={20}
                   onChangeText={(v) => setForm((f) => ({ ...f, name: v }))}
                 />
               </Input>
+              <HStack justifyContent="flex-end">
+                <Text color="$coolGray400" fontSize="$xs">{form.name.length}/20</Text>
+              </HStack>
               <FormControlHelper>
-                <FormControlHelperText>Un nombre claro te ayudará a identificarlo.</FormControlHelperText>
+                <FormControlHelperText>Máx. 20 caracteres.</FormControlHelperText>
               </FormControlHelper>
             </FormControl>
 
@@ -385,6 +514,7 @@ export default function GoalsScreen({
               </FormControlHelper>
             </FormControl>
 
+            {/* Fecha inicio */}
             <FormControl>
               <FormControlLabel>
                 <FormControlLabelText fontWeight="$bold" color="$black">Fecha inicio</FormControlLabelText>
@@ -408,6 +538,7 @@ export default function GoalsScreen({
               </Pressable>
             </FormControl>
 
+            {/* Fecha vencimiento */}
             <FormControl>
               <FormControlLabel>
                 <FormControlLabelText fontWeight="$bold" color="$black">Fecha de vencimiento</FormControlLabelText>
@@ -437,8 +568,8 @@ export default function GoalsScreen({
               h="$16"
               mt="$2"
               onPress={saveForm}
-              isDisabled={!isValid}
-              opacity={isValid ? 1 : 0.6}
+              isDisabled={!isValid || saving}
+              opacity={isValid && !saving ? 1 : 0.6}
             >
               <ButtonText fontSize="$lg" fontWeight="$semibold" color="$white">
                 {form.id ? 'Guardar cambios' : 'Guardar objetivo'}
@@ -475,7 +606,7 @@ export default function GoalsScreen({
           onLogout={onLogout}
           onBudgets={onBudgets}
           onRecurring={onRecurring}
-            onProfile={onProfile}
+          onProfile={onProfile}
         />
         <Text fontSize={24} fontWeight="$bold" color="$black">Objetivos</Text>
         <Pressable rounded="$full" p="$2" bg="$coolGray100" onPress={onNotifications}>
@@ -485,12 +616,13 @@ export default function GoalsScreen({
 
       {/* Tabs centradas */}
       <HStack px="$6" py="$2" alignItems="center" justifyContent="center" space="$3">
-        {TABS.map((t) => {
-          const selected = tab === t.key;
+        {['activos', 'pausado', 'completados'].map((key) => {
+          const label = key === 'activos' ? 'Activos' : key === 'pausado' ? 'Pausado' : 'Completados';
+          const selected = tab === key;
           return (
             <Button
-              key={t.key}
-              onPress={() => setTab(t.key)}
+              key={key}
+              onPress={() => setTab(key)}
               bg={selected ? '$black' : '$white'}
               variant={selected ? 'solid' : 'outline'}
               borderColor="$coolGray300"
@@ -499,7 +631,7 @@ export default function GoalsScreen({
               py="$2"
             >
               <ButtonText color={selected ? '$white' : '$black'} fontWeight="$bold">
-                {t.label}
+                {label}
               </ButtonText>
             </Button>
           );
@@ -514,16 +646,30 @@ export default function GoalsScreen({
         showsVerticalScrollIndicator={false}
       >
         <VStack px="$6" space="$4">
-          {list.map((g) => (
-            <GoalCard
-              key={g.id}
-              item={g}
-              onEdit={handleEdit}
-              onPause={handlePause}
-              onComplete={handleComplete}
-              onDelete={handleDelete}
-            />
-          ))}
+          {loading && (
+            <HStack space="$2" alignItems="center">
+              <Spinner />
+              <Text color="$coolGray500">Cargando…</Text>
+            </HStack>
+          )}
+
+          {!loading && list.length === 0 ? (
+            <Text color="$coolGray500" fontSize="$sm">No hay objetivos en esta pestaña.</Text>
+          ) : (
+            list.map((g) => (
+              <GoalCard
+                key={g.id}
+                item={g}
+                onEdit={handleEdit}
+                onPause={handlePause}
+                onComplete={handleComplete}
+                onDelete={handleDelete}
+                onDeposit={handleDepositOpen}
+                onResume={handleResume}
+                onRestart={handleRestart}
+              />
+            ))
+          )}
         </VStack>
       </ScrollView>
 
@@ -548,13 +694,91 @@ export default function GoalsScreen({
           <Icon as={MaterialIcons} name="add" size={28} color="$white" />
         </Button>
       </Box>
+
+      {/* Modal: Abonar (aporte) */}
+      {showDeposit && (
+        <Box
+          position="absolute"
+          top={0} left={0} right={0} bottom={0}
+          bg="rgba(0,0,0,0.35)"
+          zIndex={200}
+          alignItems="center"
+          justifyContent="center"
+        >
+          <Box w="90%" maxW={420} bg="$white" p="$4" borderRadius="$2xl" borderWidth={1} borderColor="$coolGray200">
+            <VStack space="$3">
+              <HStack alignItems="center" justifyContent="space-between">
+                <HStack alignItems="center" space="$2">
+                  <Icon as={MaterialIcons} name="savings" size={22} color="$black" />
+                  <Text fontWeight="$bold" fontSize="$md" color="$black">Abonar al objetivo</Text>
+                </HStack>
+                <Pressable onPress={() => setShowDeposit(false)}>
+                  <Icon as={MaterialIcons} name="close" size={22} color="$coolGray500" />
+                </Pressable>
+              </HStack>
+
+              <FormControl>
+                <FormControlLabel>
+                  <FormControlLabelText fontWeight="$bold" color="$black">Monto</FormControlLabelText>
+                </FormControlLabel>
+                <Input>
+                  <InputSlot pl="$3"><InputIcon as={MaterialIcons} name="attach-money" /></InputSlot>
+                  <InputField
+                    placeholder="Ej. 500.00"
+                    keyboardType="numeric"
+                    value={deposit.amount}
+                    onChangeText={(v) => setDeposit((d) => ({ ...d, amount: v }))}
+                  />
+                </Input>
+                <FormControlHelper>
+                  <FormControlHelperText>Solo números, hasta 2 decimales.</FormControlHelperText>
+                </FormControlHelper>
+              </FormControl>
+
+              <FormControl>
+                <FormControlLabel>
+                  <FormControlLabelText fontWeight="$bold" color="$black">Nota (opcional)</FormControlLabelText>
+                </FormControlLabel>
+                <Input>
+                  <InputSlot pl="$3"><InputIcon as={MaterialIcons} name="notes" /></InputSlot>
+                  <InputField
+                    placeholder="Comentario del aporte"
+                    value={deposit.note}
+                    onChangeText={(v) => setDeposit((d) => ({ ...d, note: v }))}
+                  />
+                </Input>
+              </FormControl>
+
+              <HStack mt="$2" space="$2" justifyContent="flex-end">
+                <Button variant="outline" borderColor="$coolGray300" bg="$white" onPress={() => setShowDeposit(false)}>
+                  <ButtonText color="$black">Cancelar</ButtonText>
+                </Button>
+                <Button
+                  bg="$red600"
+                  onPress={handleDepositSave}
+                  isDisabled={!isValidDeposit || savingDeposit}
+                  opacity={isValidDeposit && !savingDeposit ? 1 : 0.6}
+                >
+                  {savingDeposit ? <Spinner color="$white" /> : <ButtonText color="$white">Abonar</ButtonText>}
+                </Button>
+              </HStack>
+            </VStack>
+          </Box>
+        </Box>
+      )}
     </>
   );
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }} edges={['top', 'bottom']}>
-      <Box flex={1} bg="$white">
+      <Box flex={1} bg="$white" position="relative">
         {showForm ? renderForm() : renderList()}
+
+        {/* Overlay inicial */}
+        {initialLoading && <FullScreenLoader text="Cargando…" />}
+
+        {/* Overlay guardando (form principal) */}
+        {saving && <FullScreenLoader text="Guardando…" />}
       </Box>
     </SafeAreaView>
   );
