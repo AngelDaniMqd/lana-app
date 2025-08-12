@@ -587,8 +587,8 @@ const loadAll = async () => {
           </Text>
           <Text color="$coolGray500" fontSize="$sm" mb="$4">
             {tab === 'mePrestaron'
-              ? 'Registra lo que te prestaron (se agrupa por método id=2).'
-              : 'Registra lo que prestaste (se agrupa por método id=1).'}
+              ? 'Registra lo que te prestaron.'
+              : 'Registra lo que prestaste.'}
           </Text>
 
           <VStack space="$4">
