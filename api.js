@@ -224,21 +224,16 @@ export async function getSubcategorias(token) {
 }
 
 /* ===== Métodos de pago/uso (categoria_metodos) — NOMBRE CORREGIDO ===== */
-
 export async function getMetodos(token) {
-  const res = await fetch(`${API_BASE_URL}/categoria_metodos/`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/json',
-    },
+  const res = await fetch(`${API_BASE_URL}/categori_metodos/`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
   });
   if (!res.ok) throw new Error('No se pudieron obtener los métodos');
-  return await res.json(); // esperado: [{ id, nombre }, ...]
+  return await res.json(); // [{ id, nombre }, ...]
 }
 
-// (Opcional) CRUD de métodos si lo necesitas en pantallas de administración:
 export async function postMetodo(nombre, token) {
-  const res = await fetch(`${API_BASE_URL}/categoria_metodos/`, {
+  const res = await fetch(`${API_BASE_URL}/categori_metodos/`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -252,7 +247,7 @@ export async function postMetodo(nombre, token) {
 }
 
 export async function putMetodo(id, nombre, token) {
-  const res = await fetch(`${API_BASE_URL}/categoria_metodos/${id}`, {
+  const res = await fetch(`${API_BASE_URL}/categori_metodos/${id}`, {
     method: 'PUT',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -266,12 +261,9 @@ export async function putMetodo(id, nombre, token) {
 }
 
 export async function deleteMetodo(id, token) {
-  const res = await fetch(`${API_BASE_URL}/categoria_metodos/${id}`, {
+  const res = await fetch(`${API_BASE_URL}/categori_metodos/${id}`, {
     method: 'DELETE',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/json',
-    },
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
   });
   if (!res.ok) {
     const err = await res.text().catch(() => '');
@@ -283,6 +275,7 @@ export async function deleteMetodo(id, token) {
     return { ok: true };
   }
 }
+
 
 /* ================== Usuarios: SMS (clasificador) ================== */
 
@@ -610,90 +603,89 @@ export async function getAportes(objetivoId, token) {
 
 
 
-
-/* ================== Presupuestos (CRUD) ================== */
+// === PRESUPUESTOS ===
+export const PRESUPUESTOS_ROUTES = {
+  BASE: `${API_BASE_URL}/presupuestos`,
+  ACTIVOS: `${API_BASE_URL}/presupuestos/activos`,
+};
 
 export async function getPresupuestos(token) {
-  const res = await fetch(`${API_BASE_URL}/presupuestos/`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/json',
-    },
-  });
-  if (!res.ok) throw new Error('No se pudieron obtener los presupuestos');
-  return await res.json();
-}
-
-export async function getPresupuestosMesAno(mes, ano, token) {
-  const res = await fetch(`${API_BASE_URL}/presupuestos/mes/${encodeURIComponent(mes)}/ano/${encodeURIComponent(ano)}`, {
+  const res = await fetch(`${PRESUPUESTOS_ROUTES.BASE}/`, {
     headers: {
       Authorization: `Bearer ${token}`,
       Accept: 'application/json',
     },
   });
   if (!res.ok) {
-    // fallback amable (algunos deploys devuelven 404 si no hay data)
-    const txt = await res.text().catch(() => '');
-    throw new Error(txt || 'No se pudieron obtener los presupuestos por mes/año');
+    const err = await res.text().catch(() => '');
+    throw new Error(err || 'No se pudieron obtener los presupuestos');
   }
-  return await res.json();
+  return await res.json(); // [{ id, usuarios_id, categorias_id, monto_limite, estado, fecha_creacion, categoria_nombre, gastado, restante, porcentaje_usado, excedido }, ...]
 }
 
-export async function getPresupuestosCompleto(token) {
-  const res = await fetch(`${API_BASE_URL}/presupuestos/completo`, {
+export async function getPresupuestosActivos(token) {
+  const res = await fetch(`${PRESUPUESTOS_ROUTES.ACTIVOS}`, {
     headers: {
       Authorization: `Bearer ${token}`,
       Accept: 'application/json',
     },
   });
   if (!res.ok) {
-    const txt = await res.text().catch(() => '');
-    throw new Error(txt || 'No se pudo obtener el listado completo de presupuestos');
+    const err = await res.text().catch(() => '');
+    throw new Error(err || 'No se pudieron obtener los presupuestos activos');
   }
-  // Algunos backends devuelven string aquí; intenta parsear JSON si aplica
-  try {
-    return await res.json();
-  } catch {
-    return [];
-  }
+  return await res.json();
 }
 
-export async function postPresupuesto({ categorias_id, monto_limite, mes, ano }, token) {
-  const body = new URLSearchParams({
-    categorias_id: String(categorias_id),
-    monto_limite: String(monto_limite),
-    mes: String(mes),
-    ano: String(ano),
-  }).toString();
+/**
+ * Crea un presupuesto
+ * @param {object} data - { categorias_id: number, monto_limite: number, estado?: 'activo'|'inactivo' }
+ */
+export async function postPresupuesto(data, token) {
+  const payload = new URLSearchParams(
+    Object.entries({
+      categorias_id: String(data.categorias_id),
+      monto_limite: String(data.monto_limite),
+      ...(data.estado ? { estado: String(data.estado) } : {}),
+    })
+  ).toString();
 
-  const res = await fetch(`${API_BASE_URL}/presupuestos/`, {
+  const res = await fetch(`${PRESUPUESTOS_ROUTES.BASE}/`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/x-www-form-urlencoded',
       Accept: 'application/json',
     },
-    body,
+    body: payload,
   });
 
   if (!res.ok) {
-    const msg = await res.text().catch(() => '');
-    throw new Error(msg || 'No se pudo crear el presupuesto');
+    const err = await res.text().catch(() => '');
+    throw new Error(err || 'No se pudo crear el presupuesto');
   }
   return await res.json();
 }
 
-export async function putPresupuesto(presupuestoId, data, token) {
-  const payload = new URLSearchParams(
+/**
+ * Actualiza un presupuesto
+ * @param {number|string} id
+ * @param {object} data - { categorias_id?, monto_limite?, estado? }
+ */
+export async function putPresupuesto(id, data, token) {
+  const filtered = Object.fromEntries(
     Object.entries({
-      ...(data.categorias_id != null ? { categorias_id: data.categorias_id } : {}),
-      ...(data.monto_limite != null ? { monto_limite: data.monto_limite } : {}),
-      ...(data.mes != null ? { mes: data.mes } : {}),
-      ...(data.ano != null ? { ano: data.ano } : {}),
-    }).reduce((acc, [k, v]) => ((acc[k] = String(v)), acc), {})
+      categorias_id: data.categorias_id,
+      monto_limite: data.monto_limite,
+      estado: data.estado,
+    }).filter(([, v]) => v !== undefined && v !== null && v !== '')
+  );
+
+  const payload = new URLSearchParams(
+    Object.entries(filtered).reduce((acc, [k, v]) => ((acc[k] = String(v)), acc), {})
   ).toString();
 
-  const res = await fetch(`${API_BASE_URL}/presupuestos/${presupuestoId}`, {
+  const res = await fetch(`${PRESUPUESTOS_ROUTES.BASE}/${id}`, {
     method: 'PUT',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -704,27 +696,228 @@ export async function putPresupuesto(presupuestoId, data, token) {
   });
 
   if (!res.ok) {
-    const msg = await res.text().catch(() => '');
-    throw new Error(msg || 'No se pudo actualizar el presupuesto');
+    const err = await res.text().catch(() => '');
+    throw new Error(err || 'No se pudo actualizar el presupuesto');
   }
   return await res.json();
 }
 
-export async function deletePresupuesto(presupuestoId, token) {
-  const res = await fetch(`${API_BASE_URL}/presupuestos/${presupuestoId}`, {
+export async function patchPresupuestoEstado(id, estado, token) {
+  const payload = new URLSearchParams({ estado: String(estado) }).toString();
+
+  const res = await fetch(`${PRESUPUESTOS_ROUTES.BASE}/${id}/estado`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Accept: 'application/json',
+    },
+    body: payload,
+  });
+
+  if (!res.ok) {
+    const err = await res.text().catch(() => '');
+    throw new Error(err || 'No se pudo cambiar el estado del presupuesto');
+  }
+  return await res.json();
+}
+
+export async function deletePresupuesto(id, token) {
+  const res = await fetch(`${PRESUPUESTOS_ROUTES.BASE}/${id}`, {
     method: 'DELETE',
     headers: {
       Authorization: `Bearer ${token}`,
       Accept: 'application/json',
     },
   });
+
   if (!res.ok) {
-    const msg = await res.text().catch(() => '');
-    throw new Error(msg || 'No se pudo eliminar el presupuesto');
+    const err = await res.text().catch(() => '');
+    throw new Error(err || 'No se pudo eliminar el presupuesto');
   }
   try {
     return await res.json();
   } catch {
     return { ok: true };
   }
+}
+
+
+// === PAGOS FIJOS ===
+export const PAGOS_FIJOS_ROUTES = {
+  BASE: `${API_BASE_URL}/pagos-fijos`,
+  PROXIMOS: `${API_BASE_URL}/pagos-fijos/proximos`,
+};
+
+export async function getPagosFijos(token) {
+  const res = await fetch(`${PAGOS_FIJOS_ROUTES.BASE}/`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const err = await res.text().catch(() => '');
+    throw new Error(err || 'No se pudieron obtener los pagos fijos');
+  }
+  return await res.json(); // [{ id, usuarios_id, nombre, monto, dia_pago, activo, fecha_creacion }, ...]
+}
+
+export async function getPagosProximos(token) {
+  const res = await fetch(`${PAGOS_FIJOS_ROUTES.PROXIMOS}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const err = await res.text().catch(() => '');
+    throw new Error(err || 'No se pudieron obtener los pagos próximos');
+  }
+  return await res.json();
+}
+
+/**
+ * Crear pago fijo
+ * body: { nombre: string, monto: number, dia_pago: 1..31 }
+ */
+export async function postPagoFijo(data, token) {
+  const payload = new URLSearchParams({
+    nombre: String(data.nombre),
+    monto: String(data.monto),
+    dia_pago: String(data.dia_pago),
+  }).toString();
+
+  const res = await fetch(`${PAGOS_FIJOS_ROUTES.BASE}/`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Accept: 'application/json',
+    },
+    body: payload,
+  });
+
+  if (!res.ok) {
+    const err = await res.text().catch(() => '');
+    throw new Error(err || 'No se pudo crear el pago fijo');
+  }
+  return await res.json();
+}
+
+/**
+ * Actualizar pago fijo
+ * id: number
+ * data (opcionales): { nombre?, monto?, dia_pago?, activo? }  // activo: 0|1
+ */
+export async function putPagoFijo(id, data, token) {
+  const filtered = Object.fromEntries(
+    Object.entries({
+      nombre: data.nombre,
+      monto: data.monto,
+      dia_pago: data.dia_pago,
+      activo: data.activo,
+    }).filter(([, v]) => v !== undefined && v !== null && v !== '')
+  );
+
+  const payload = new URLSearchParams(
+    Object.entries(filtered).reduce((acc, [k, v]) => ((acc[k] = String(v)), acc), {})
+  ).toString();
+
+  const res = await fetch(`${PAGOS_FIJOS_ROUTES.BASE}/${id}`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Accept: 'application/json',
+    },
+    body: payload,
+  });
+
+  if (!res.ok) {
+    const err = await res.text().catch(() => '');
+    throw new Error(err || 'No se pudo actualizar el pago fijo');
+  }
+  return await res.json();
+}
+
+export async function deletePagoFijo(id, token) {
+  const res = await fetch(`${PAGOS_FIJOS_ROUTES.BASE}/${id}`, {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.text().catch(() => '');
+    throw new Error(err || 'No se pudo eliminar el pago fijo');
+  }
+  try {
+    return await res.json();
+  } catch {
+    return { ok: true };
+  }
+}
+
+
+
+
+
+// === GRAFICOS ===
+export async function getGraficosResumen(token) {
+  const res = await fetch(`${API_BASE_URL}/graficos/resumen`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+  });
+  if (!res.ok) throw new Error(await res.text().catch(()=>'') || 'No se pudo obtener el resumen');
+  return await res.json(); // { total_saldo, total_movimientos, ingresos_mes, gastos_mes, balance_mes, usuario }
+}
+
+export async function getGraficosPorDias(token, dias = 30) {
+  const res = await fetch(`${API_BASE_URL}/graficos/por-dias?dias=${encodeURIComponent(dias)}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+  });
+  if (!res.ok) throw new Error(await res.text().catch(()=>'') || 'No se pudo obtener movimientos por días');
+  return await res.json(); // { periodo, fecha_inicio, fecha_fin, resumen_diario: [{fecha, ingresos, gastos, balance, cantidad_movimientos}] }
+}
+
+export async function getGraficosPorCategoria(token, dias = 30) {
+  const res = await fetch(`${API_BASE_URL}/graficos/por-categoria?dias=${encodeURIComponent(dias)}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+  });
+  if (!res.ok) throw new Error(await res.text().catch(()=>'') || 'No se pudieron obtener categorías');
+  return await res.json(); // { total_ingresos, total_gastos, categorias: [{categoria, ingresos, gastos, ...}] }
+}
+
+export async function getGraficosTendenciaMensual(token) {
+  const res = await fetch(`${API_BASE_URL}/graficos/tendencia-mensual`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+  });
+  if (!res.ok) throw new Error(await res.text().catch(()=>'') || 'No se pudo obtener tendencia mensual');
+  return await res.json(); // { tendencia_mensual: [{año, mes, mes_nombre, ingresos, gastos, balance, cantidad}] }
+}
+
+export async function getGraficosCuentas(token) {
+  const res = await fetch(`${API_BASE_URL}/graficos/cuentas`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+  });
+  if (!res.ok) throw new Error(await res.text().catch(()=>'') || 'No se pudo obtener cuentas');
+  return await res.json(); // { total_saldo, cuentas: [{id, nombre, saldo, movimientos}] }
+}
+
+export async function getCircularGastos(token, dias = 30) {
+  const res = await fetch(`${API_BASE_URL}/graficos/circular-gastos?dias=${encodeURIComponent(dias)}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+  });
+  if (!res.ok) throw new Error(await res.text().catch(()=>'') || 'No se pudo obtener circular de gastos');
+  return await res.json(); // { total_gastos, categorias_gastos: [{categoria, monto, porcentaje}] }
+}
+
+export async function getCircularIngresos(token, dias = 30) {
+  const res = await fetch(`${API_BASE_URL}/graficos/circular-ingresos?dias=${encodeURIComponent(dias)}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+  });
+  if (!res.ok) throw new Error(await res.text().catch(()=>'') || 'No se pudo obtener circular de ingresos');
+  return await res.json(); // { total_ingresos, categorias_ingresos: [{categoria, monto, porcentaje}] }
 }

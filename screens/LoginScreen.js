@@ -247,33 +247,7 @@ export default function LoginScreen({ onBack, onRegister, onLogin }) {
               )}
             </FormControl>
 
-            {/* Recordarme / Olvido */}
-            <HStack justifyContent="space-between" alignItems="center" mt="$2">
-              <HStack space="$2" alignItems="center">
-                <Checkbox
-                  value="remember"
-                  isChecked={remember}
-                  onChange={setRemember}
-                  size="md"
-                >
-                  <CheckboxIndicator
-                    borderColor="$red600"
-                    $checked={{ bg: "$red600", borderColor: "$red600" }}
-                  >
-                    <CheckboxIcon as={CheckIcon} color="$white" />
-                  </CheckboxIndicator>
-                  <CheckboxLabel ml="$2">
-                    <Text fontSize="$md" color="$black" fontWeight="$medium">Recordarme</Text>
-                  </CheckboxLabel>
-                </Checkbox>
-              </HStack>
-              <Pressable>
-                <Text fontSize="$md" color="$blue600" fontWeight="$semibold">
-                  ¿Olvidaste tu contraseña?
-                </Text>
-              </Pressable>
-            </HStack>
-
+         
             {/* Botón principal */}
             <Button
               bg={loading ? "$red800" : "$red600"}

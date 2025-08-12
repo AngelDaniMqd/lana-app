@@ -253,7 +253,7 @@ export default function App() {
   } else if (currentScreen === 'recurring') {
     ScreenComponent = (
       <RecurringPaymentsScreen
-      
+        token={token}
         onMenu={go('records')}
         onStatistics={go('statistics')}
         onDebts={go('debts')}
@@ -298,6 +298,7 @@ export default function App() {
   } else if (currentScreen === 'statistics') {
     ScreenComponent = (
       <StatisticsScreen
+       token={token} 
         onMenu={go('records')}
         onStatistics={go('statistics')}
         onDebts={go('debts')}
@@ -348,6 +349,7 @@ export default function App() {
   } else if (currentScreen === 'notifications') {
     ScreenComponent = (
       <NotificationsScreen
+       token={token} 
         onBack={go('home')}
         onBudgets={go('budgets')}
         onRecurring={go('recurring')}
