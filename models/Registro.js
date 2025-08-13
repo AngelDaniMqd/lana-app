@@ -15,7 +15,7 @@ class Registro {
       
       return await this.obtenerPorId(result.insertId);
     } catch (error) {
-      throw new Error(`Error al crear registro: ${error.message}`);
+      throw new Error(`Error al crear registro, vuelve a intentarlo: ${error.message}`);
     }
   }
 

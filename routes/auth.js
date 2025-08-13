@@ -42,7 +42,7 @@ router.post('/registro', async (req, res) => {
 
     if (existingUser.length > 0) {
       return res.status(400).json({
-        error: 'El correo ya está registrado'
+        error: 'Este correo ya está registrado'
       });
     }
 
